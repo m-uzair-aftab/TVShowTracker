@@ -86,9 +86,11 @@ export function WatchlistManager({ showId, totalSeasons }: WatchlistManagerProps
   // Remove from watchlist mutation
   const removeFromWatchlist = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/watchlist/${showId}`, {
-        method: 'DELETE'
-      });
+    const response = await fetch(`${API_BASE_URL}/api/watchlist/${showId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+
       
       if (!response.ok) {
         throw new Error('Failed to remove from watchlist');
@@ -104,11 +106,13 @@ export function WatchlistManager({ showId, totalSeasons }: WatchlistManagerProps
   // Update season progress mutation
   const updateSeasonProgress = useMutation({
     mutationFn: async ({ seasonNumber, data }: { seasonNumber: number, data: Partial<SeasonProgressData> }) => {
-      const response = await fetch(`/api/watchlist/${showId}/progress/${seasonNumber}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
+      const response = await fetch(`${API_BASE_URL}/api/watchlist/${showId}/progress/${seasonNumber}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
       
       if (!response.ok) {
         throw new Error('Failed to update season progress');

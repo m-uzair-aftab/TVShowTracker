@@ -7,6 +7,7 @@ import { ResultsSection } from '@/components/results-section';
 import { MyTVShows } from '@/components/fixed-my-tv-shows';
 import { TvShow } from '@shared/schema';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { API_BASE_URL } from '../config';
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,18 +36,31 @@ export default function Home() {
   
   // This effect was duplicated - removed
 
-  const { data: shows, isLoading, error } = useQuery<TvShow[]>({
-    queryKey: ['/api/tv-shows/search', searchQuery],
-    enabled: searchPerformed && !!searchQuery,
-    queryFn: async () => {
-      const response = await fetch(`/api/tv-shows/search?query=${encodeURIComponent(searchQuery)}`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to fetch shows");
+
+const { data: shows, isLoading, error } = useQuery<TvShow[]>({
+  // keep the key descriptive and independent of the absolute URL
+  queryKey: ['tv-shows/search', searchQuery],
+  enabled: searchPerformed && !!searchQuery,
+  queryFn: async () => {
+    const url = `${API_BASE_URL}/api/tv-shows/search?query=${encodeURIComponent(searchQuery)}`;
+    const response = await fetch(url, {
+      credentials: 'include',                          // ← send/receive session cookie
+      headers: { 'Content-Type': 'application/json' }, // (optional but fine)
+    });
+    if (!response.ok) {
+      // try to parse JSON, but fall back to text in case of HTML 404s
+      let msg = 'Failed to fetch shows';
+      try {
+        const errJson = await response.json();
+        msg = errJson.message || msg;
+      } catch {
+        msg = await response.text();
       }
-      return response.json();
+      throw new Error(msg);
     }
-  });
+    return response.json();
+  },
+});
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);

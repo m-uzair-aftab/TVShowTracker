@@ -1,4 +1,6 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { API_BASE_URL } from '@/config'; // or '../config' if you don't use @ alias
+
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -7,44 +9,40 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+
 export async function apiRequest(
   method: string,
-  url: string,
-  data?: unknown | undefined,
+  path: string,
+  data?: unknown,
 ): Promise<Response> {
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: data == null ? undefined : JSON.stringify(data),
   });
-
   await throwIfResNotOk(res);
   return res;
 }
 
+
 type UnauthorizedBehavior = "returnNull" | "throw";
-export const getQueryFn: <T>(options: {
-  on401: UnauthorizedBehavior;
-}) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
-    const res = await fetch(queryKey[0] as string, {
-      credentials: "include",
+export function getQueryFn(): import('@tanstack/react-query').QueryFunction {
+  // expects queryKey like: ['/api/some/path'] or ['/api/search', { q: 'x' }]
+  return async ({ queryKey }) => {
+    const [path, params] = queryKey as [string, Record<string, any>?];
+    const qs = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+    const res = await fetch(`${API_BASE_URL}${path}${qs}`, {
+      credentials: 'include',
     });
-
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
-
     await throwIfResNotOk(res);
-    return await res.json();
+    return res.json();
   };
-
+}
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: getQueryFn({ on401: "throw" }),
+      queryFn: getQueryFn(),
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
