@@ -1,14 +1,58 @@
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+// --- imports (keep these at the very top) ---
+import 'dotenv/config';
+import express, { type Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import session from 'express-session';
+import connectPgSimple from 'connect-pg-simple';
+
+import { registerRoutes } from './routes';
+import { setupVite, serveStatic, log } from './vite';
 
 // Set a default session secret for development
 if (!process.env.SESSION_SECRET) {
   process.env.SESSION_SECRET = "tv-tracker-dev-secret-key";
 }
 
+
+
 const app = express();
+// JSON body parsing
 app.use(express.json());
+
+// CORS: allow your local Vite and your Netlify site
+const allowedOrigins = [
+  'http://localhost:5173',                 // local React dev
+  'https://YOUR-NETLIFY-SITE.netlify.app'  // <-- replace with your real Netlify URL later
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
+const PgSession = connectPgSimple(session);
+
+// Needed when running behind Render's proxy to use secure cookies
+app.set('trust proxy', 1);
+
+app.use(session({
+  store: new PgSession({
+    conString: process.env.DATABASE_URL!,   // your Neon connection string from .env
+    createTableIfMissing: true
+  }),
+  secret: process.env.SESSION_SECRET!,      // from .env (or the dev fallback above)
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production', // true on Render
+    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
+  }
+}));
+
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+
 app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {
@@ -64,7 +108,7 @@ app.use((req, res, next) => {
   // ALWAYS serve the app on port 5000
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = 5000;
+  const port = Number(process.env.PORT) || 5000;
   server.listen({
     port,
     host: "0.0.0.0",
