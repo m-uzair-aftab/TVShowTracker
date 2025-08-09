@@ -22,7 +22,7 @@ app.use(express.json());
 // CORS: allow your local Vite and your Netlify site
 const allowedOrigins = [
   'http://localhost:5173',                 // local React dev
-  'https://YOUR-NETLIFY-SITE.netlify.app'  // <-- replace with your real Netlify URL later
+  'https://tvshowtracker.netlify.app'  // <-- replace with your real Netlify URL later
 ];
 
 app.use(cors({
