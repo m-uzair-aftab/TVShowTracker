@@ -38,28 +38,8 @@ export default function Home() {
 
 
 const { data: shows, isLoading, error } = useQuery<TvShow[]>({
-  // keep the key descriptive and independent of the absolute URL
-  queryKey: ['tv-shows/search', searchQuery],
+  queryKey: ['/api/tv-shows/search', { query: searchQuery }],
   enabled: searchPerformed && !!searchQuery,
-  queryFn: async () => {
-    const url = `${API_BASE_URL}/api/tv-shows/search?query=${encodeURIComponent(searchQuery)}`;
-    const response = await fetch(url, {
-      credentials: 'include',                          // ← send/receive session cookie
-      headers: { 'Content-Type': 'application/json' }, // (optional but fine)
-    });
-    if (!response.ok) {
-      // try to parse JSON, but fall back to text in case of HTML 404s
-      let msg = 'Failed to fetch shows';
-      try {
-        const errJson = await response.json();
-        msg = errJson.message || msg;
-      } catch {
-        msg = await response.text();
-      }
-      throw new Error(msg);
-    }
-    return response.json();
-  },
 });
 
   const handleSearch = (query: string) => {

@@ -1,4 +1,4 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { QueryClient, QueryFunction, QueryFunctionContext } from '@tanstack/react-query';
 import { API_BASE_URL } from '@/config'; // or '../config' if you don't use @ alias
 
 
@@ -27,18 +27,35 @@ export async function apiRequest(
 
 
 type UnauthorizedBehavior = "returnNull" | "throw";
-export function getQueryFn(): import('@tanstack/react-query').QueryFunction {
-  // expects queryKey like: ['/api/some/path'] or ['/api/search', { q: 'x' }]
-  return async ({ queryKey }) => {
-    const [path, params] = queryKey as [string, Record<string, any>?];
-    const qs = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+
+
+// queryClient.ts
+export function getQueryFn(opts?: { on401?: 'returnNull' | 'throw' }): QueryFunction {
+  return async ({ queryKey }: QueryFunctionContext) => {
+    const [path, params] = queryKey as [string, any?];
+
+    let qs = '';
+    if (typeof params === 'string') {
+      qs = `?query=${encodeURIComponent(params)}`;
+    } else if (params) {
+      qs = `?${new URLSearchParams(params as Record<string, string>).toString()}`;
+    }
+
     const res = await fetch(`${API_BASE_URL}${path}${qs}`, {
       credentials: 'include',
     });
-    await throwIfResNotOk(res);
+
+    if (!res.ok) {
+      if (res.status === 401 && opts?.on401 === 'returnNull') {
+        return undefined;
+      }
+      throw new Error((await res.text()) || res.statusText);
+    }
+
     return res.json();
   };
 }
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
