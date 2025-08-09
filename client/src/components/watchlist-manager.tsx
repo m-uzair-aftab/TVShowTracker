@@ -5,6 +5,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { SeasonProgressForm } from './season-progress-form';
 import { SeasonProgressView } from './season-progress-view';
+import { API_BASE_URL } from '../config';
+
 
 // Define the right type for API responses
 interface WatchlistCheckResponse {
@@ -59,10 +61,11 @@ export function WatchlistManager({ showId, totalSeasons }: WatchlistManagerProps
   // Add to watchlist mutation
   const addToWatchlist = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/watchlist', {
+      const response = await fetch(`${API_BASE_URL}/api/watchlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ showId })
+        body: JSON.stringify({ showId }),
+        credentials: 'include' // if you need cookies/session
       });
       
       if (!response.ok) {
