@@ -4,6 +4,8 @@ import { useQuery, useMutation, UseMutationResult } from '@tanstack/react-query'
 import { API_BASE_URL } from '@/config';               // base URL for your Render API
 import { apiRequest, queryClient } from '../lib/queryClient';
 import { useToast } from '@/hooks/use-toast';          // if your alias isn't set, change to '../hooks/use-toast'
+import { useLocation } from 'wouter';
+
 
 // ---- Types ----
 export interface User {
@@ -38,6 +40,7 @@ export const AuthContext = createContext<AuthContextType | null>(null);
 // ---- Provider ----
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   // Current user: inline queryFn so 401 => undefined (not an error)
   const {
@@ -108,25 +111,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   // Logout
-  const logoutMutation = useMutation<void, Error, void>({
-    mutationFn: async () => {
-      await apiRequest('POST', '/api/auth/logout');
-    },
-    onSuccess: () => {
-      queryClient.setQueryData<User | undefined>(['/api/auth/me'], undefined);
-      toast({
-        title: 'Logged out',
-        description: 'You have been successfully logged out.',
-      });
-    },
-    onError: (e) => {
-      toast({
-        title: 'Logout failed',
-        description: e.message,
-        variant: 'destructive',
-      });
-    },
-  });
+const logoutMutation = useMutation<void, Error, void>({
+  mutationFn: async () => {
+    await apiRequest('POST', '/api/auth/logout');
+  },
+  onSuccess: () => {
+    // Immediately clear any notion of a logged-in user
+    queryClient.removeQueries({ queryKey: ['/api/auth/me'], exact: true });
+    // (Optional) also clear everything else cached
+    // queryClient.clear();
+
+    // Redirect to your login page (change to '/' if your login lives there)
+    setLocation('/auth');
+
+    toast({
+      title: 'Logged out',
+      description: 'You have been successfully logged out.',
+    });
+  },
+  onError: (e) => {
+    toast({
+      title: 'Logout failed',
+      description: e.message,
+      variant: 'destructive',
+    });
+  },
+});
+  
 
   return (
     <AuthContext.Provider
