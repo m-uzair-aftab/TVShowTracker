@@ -5,6 +5,7 @@ import { API_BASE_URL } from '@/config';               // base URL for your Rend
 import { apiRequest, queryClient } from '../lib/queryClient';
 import { useToast } from '@/hooks/use-toast';          // if your alias isn't set, change to '../hooks/use-toast'
 import { useLocation } from 'wouter';
+import { setToken, clearToken, getToken } from '../lib/token';
 
 
 // ---- Types ----
@@ -49,9 +50,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
   } = useQuery<User | undefined, Error>({
     queryKey: ['/api/auth/me'],
+    enabled: !!getToken(), // Only run if we have a token
     queryFn: async () => {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
       const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        credentials: 'include',
+        credentials: 'include', // Keep for backward compatibility
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
       });
       if (res.status === 401) return undefined;           // unauthenticated
       if (!res.ok) throw new Error(await res.text());
@@ -64,7 +74,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginMutation = useMutation<User, Error, LoginData>({
     mutationFn: async (credentials) => {
       const res = await apiRequest('POST', '/api/auth/login', credentials);
-      return (await res.json()) as User;
+      const data = await res.json();
+      
+      // Handle new response format with token
+      if (data.token && data.user) {
+        setToken(data.token);
+        return data.user as User;
+      }
+      
+      // Fallback to old format for backward compatibility
+      return data as User;
     },
     onSuccess: (loggedInUser) => {
       queryClient.setQueryData<User | undefined>(['/api/auth/me'], loggedInUser);
@@ -89,7 +108,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const registerMutation = useMutation<User, Error, RegisterData>({
     mutationFn: async (userData) => {
       const res = await apiRequest('POST', '/api/auth/register', userData);
-      return (await res.json()) as User;
+      const data = await res.json();
+      
+      // Handle new response format with token
+      if (data.token && data.user) {
+        setToken(data.token);
+        return data.user as User;
+      }
+      
+      // Fallback to old format for backward compatibility
+      return data as User;
     },
     onSuccess: (newUser) => {
       queryClient.setQueryData<User | undefined>(['/api/auth/me'], newUser);
@@ -116,6 +144,9 @@ const logoutMutation = useMutation<void, Error, void>({
     await apiRequest('POST', '/api/auth/logout');
   },
   onSuccess: () => {
+    // Clear JWT token
+    clearToken();
+    
     // Immediately clear any notion of a logged-in user
     queryClient.removeQueries({ queryKey: ['/api/auth/me'], exact: true });
     // (Optional) also clear everything else cached

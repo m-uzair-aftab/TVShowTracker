@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import { storage } from './storage';
 
 // Extend the Express session with our own types
@@ -8,6 +9,50 @@ declare module 'express-session' {
   interface SessionData {
     userId?: number;
   }
+}
+
+// Extend Express Request to include userId from JWT
+declare global {
+  namespace Express {
+    interface Request { userId?: number }
+  }
+}
+
+// JWT token functions
+export function signToken(userId: number) {
+  const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET || 'dev-only-placeholder';
+  return jwt.sign({ userId }, secret, { expiresIn: '7d' });
+}
+
+export function verifyToken(token: string): { userId: number } | null {
+  try {
+    const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET || 'dev-only-placeholder';
+    return jwt.verify(token, secret) as { userId: number };
+  } catch {
+    return null;
+  }
+}
+
+// Hybrid auth middleware that accepts both JWT tokens and sessions
+export function authHybrid(req: Request, res: Response, next: NextFunction) {
+  // 1) Try JWT token from Authorization header
+  const auth = req.headers.authorization || '';
+  const m = auth.match(/^Bearer (.+)$/i);
+  if (m) {
+    const payload = verifyToken(m[1]);
+    if (payload) {
+      req.userId = payload.userId;
+      return next();
+    }
+  }
+  
+  // 2) Fallback to session (existing path)
+  if (req.session.userId) {
+    req.userId = req.session.userId;
+    return next();
+  }
+  
+  return res.status(401).json({ message: 'Authentication required' });
 }
 
 export function setupAuth(app: express.Express) {
@@ -52,12 +97,15 @@ export function setupAuth(app: express.Express) {
         lastName: lastName || null
       });
 
-      // Set session
+      // Set session (for backward compatibility)
       req.session.userId = user.id;
       
-      // Return user data (without password)
+      // Generate JWT token
+      const token = signToken(user.id);
+      
+      // Return user data with token (without password)
       const { password: _, ...userWithoutPassword } = user;
-      res.status(201).json(userWithoutPassword);
+      res.status(201).json({ token, user: userWithoutPassword });
     } catch (error) {
       console.error('Registration error:', error);
       res.status(500).json({ message: 'Failed to register user' });
@@ -86,12 +134,15 @@ export function setupAuth(app: express.Express) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
-      // Set session
+      // Set session (for backward compatibility)
       req.session.userId = user.id;
       
-      // Return user data (without password)
+      // Generate JWT token
+      const token = signToken(user.id);
+      
+      // Return user data with token (without password)
       const { password: _, ...userWithoutPassword } = user;
-      res.status(200).json(userWithoutPassword);
+      res.status(200).json({ token, user: userWithoutPassword });
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ message: 'Failed to login' });
@@ -113,13 +164,34 @@ export function setupAuth(app: express.Express) {
   // Get current user endpoint
   app.get('/api/auth/me', async (req: Request, res: Response) => {
     try {
-      if (!req.session.userId) {
+      // Use authHybrid middleware logic here
+      let userId: number | undefined;
+      
+      // 1) Try JWT token from Authorization header
+      const auth = req.headers.authorization || '';
+      const m = auth.match(/^Bearer (.+)$/i);
+      if (m) {
+        const payload = verifyToken(m[1]);
+        if (payload) {
+          userId = payload.userId;
+        }
+      }
+      
+      // 2) Fallback to session
+      if (!userId && req.session.userId) {
+        userId = req.session.userId;
+      }
+      
+      if (!userId) {
         return res.status(401).json({ message: 'Not authenticated' });
       }
 
-      const user = await storage.getUser(req.session.userId);
+      const user = await storage.getUser(userId);
       if (!user) {
-        req.session.destroy(() => {});
+        // Clear session if user not found
+        if (req.session.userId) {
+          req.session.destroy(() => {});
+        }
         return res.status(401).json({ message: 'User not found' });
       }
 

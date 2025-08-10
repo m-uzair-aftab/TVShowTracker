@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from 'bcrypt';
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./auth";
+import { setupAuth, authHybrid } from "./auth";
 import { 
   searchTvShowSchema, 
   insertTvShowSchema, 
@@ -124,12 +124,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Watchlist routes
   
   // Add show to watchlist
-  app.post("/api/watchlist", isAuthenticated, async (req, res) => {
+  app.post("/api/watchlist", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       const { showId } = req.body;
       
       if (!showId || typeof showId !== 'number') {
@@ -152,12 +149,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Get user's watchlist
-  app.get("/api/watchlist", isAuthenticated, async (req, res) => {
+  app.get("/api/watchlist", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       
       const watchlist = await storage.getUserWatchlist(userId);
       res.json(watchlist);
@@ -168,12 +162,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Get user's watchlist with activity dates and season progress - for My TV Shows tab
-  app.get("/api/watchlist/myshows", isAuthenticated, async (req, res) => {
+  app.get("/api/watchlist/myshows", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       
       const watchlistWithActivity = await storage.getUserWatchlistWithActivity(userId);
       res.json(watchlistWithActivity);
@@ -184,12 +175,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Check if show is in watchlist
-  app.get("/api/watchlist/check/:showId", isAuthenticated, async (req, res) => {
+  app.get("/api/watchlist/check/:showId", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       const showId = parseInt(req.params.showId);
       
       if (isNaN(showId)) {
@@ -205,12 +193,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Remove from watchlist
-  app.delete("/api/watchlist/:showId", isAuthenticated, async (req, res) => {
+  app.delete("/api/watchlist/:showId", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       const showId = parseInt(req.params.showId);
       
       if (isNaN(showId)) {
@@ -228,12 +213,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Season progress routes
   
   // Get season progress for a show
-  app.get("/api/watchlist/:showId/progress", isAuthenticated, async (req, res) => {
+  app.get("/api/watchlist/:showId/progress", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       const showId = parseInt(req.params.showId);
       
       if (isNaN(showId)) {
@@ -256,12 +238,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Update season progress
-  app.post("/api/watchlist/:showId/progress/:seasonNumber", isAuthenticated, async (req, res) => {
+  app.post("/api/watchlist/:showId/progress/:seasonNumber", authHybrid, async (req, res) => {
     try {
-      const userId = req.session.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
+      const userId = req.userId!;
       const showId = parseInt(req.params.showId);
       const seasonNumber = parseInt(req.params.seasonNumber);
       

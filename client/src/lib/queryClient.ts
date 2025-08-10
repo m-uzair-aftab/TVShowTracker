@@ -1,5 +1,6 @@
 import { QueryClient, QueryFunction, QueryFunctionContext } from '@tanstack/react-query';
 import { API_BASE_URL } from '@/config'; // or '../config' if you don't use @ alias
+import { getToken } from './token';
 
 
 async function throwIfResNotOk(res: Response) {
@@ -15,10 +16,17 @@ export async function apiRequest(
   path: string,
   data?: unknown,
 ): Promise<Response> {
+  const token = getToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // Keep for backward compatibility
+    headers,
     body: data == null ? undefined : JSON.stringify(data),
   });
   await throwIfResNotOk(res);
@@ -41,8 +49,16 @@ export function getQueryFn(opts?: { on401?: 'returnNull' | 'throw' }): QueryFunc
       qs = `?${new URLSearchParams(params as Record<string, string>).toString()}`;
     }
 
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(`${API_BASE_URL}${path}${qs}`, {
-      credentials: 'include',
+      credentials: 'include', // Keep for backward compatibility
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
     });
 
     if (!res.ok) {
