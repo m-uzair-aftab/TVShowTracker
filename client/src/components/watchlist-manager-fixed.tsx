@@ -7,7 +7,7 @@ import { SeasonProgressForm } from './season-progress-form';
 import { SeasonProgressView } from './season-progress-view';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { API_BASE_URL } from '../config';
+import { apiRequest } from '../lib/queryClient';
 
 
 
@@ -65,12 +65,7 @@ export function WatchlistManager({ showId, totalSeasons }: WatchlistManagerProps
   // Add to watchlist mutation
   const addToWatchlist = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/watchlist`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ showId }),
-        credentials: 'include' // if you need cookies/session
-      });
+      const response = await apiRequest('POST', '/api/watchlist', { showId });
       
       if (!response.ok) {
         throw new Error('Failed to add to watchlist');
@@ -86,11 +81,7 @@ export function WatchlistManager({ showId, totalSeasons }: WatchlistManagerProps
   // Remove from watchlist mutation
   const removeFromWatchlist = useMutation({
     mutationFn: async () => {
-    const response = await fetch(`${API_BASE_URL}/api/watchlist/${showId}`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-
+      const response = await apiRequest('DELETE', `/api/watchlist/${showId}`);
       
       if (!response.ok) {
         throw new Error('Failed to remove from watchlist');
@@ -106,13 +97,7 @@ export function WatchlistManager({ showId, totalSeasons }: WatchlistManagerProps
   // Update season progress mutation
   const updateSeasonProgress = useMutation({
     mutationFn: async ({ seasonNumber, data }: { seasonNumber: number, data: Partial<SeasonProgressData> }) => {
-      const response = await fetch(`${API_BASE_URL}/api/watchlist/${showId}/progress/${seasonNumber}`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-
+      const response = await apiRequest('POST', `/api/watchlist/${showId}/progress/${seasonNumber}`, data);
       
       if (!response.ok) {
         throw new Error('Failed to update season progress');

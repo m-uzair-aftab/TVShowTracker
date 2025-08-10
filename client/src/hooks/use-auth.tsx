@@ -59,10 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        credentials: 'include', // Keep for backward compatibility
-        headers: Object.keys(headers).length > 0 ? headers : undefined,
-      });
+      const res = await apiRequest('GET', '/api/auth/me');
       if (res.status === 401) return undefined;           // unauthenticated
       if (!res.ok) throw new Error(await res.text());
       return (await res.json()) as User;
