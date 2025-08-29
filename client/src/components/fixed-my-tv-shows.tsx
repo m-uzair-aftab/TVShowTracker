@@ -375,6 +375,8 @@ export function MyTVShows({ onSwitchToSearch }: MyTVShowsProps) {
                 <SelectItem value="all">All Years</SelectItem>
                 <SelectItem value="2025">2025</SelectItem>
                 <SelectItem value="2024">2024</SelectItem>
+                <SelectItem value="2023">2023</SelectItem>
+                <SelectItem value="2022">2022</SelectItem>
               </SelectContent>
             </Select>
           </div>
