@@ -42,10 +42,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Process each show from the API
       for (const apiShow of apiShows) {
-        // Check if show already exists in our database by title
-        const existingShow = existingShows.find(
-          show => show.title.toLowerCase() === apiShow.title.toLowerCase()
-        );
+        // Check if show already exists in our database
+        // Priority: match by tvmaze_id first (if available), then by title (only if no tvmaze_id)
+        let existingShow: typeof existingShows[0] | undefined;
+        
+        if (apiShow.tvmaze_id) {
+          // If API show has tvmaze_id, match by tvmaze_id first
+          existingShow = existingShows.find(
+            show => show.tvmaze_id === apiShow.tvmaze_id
+          );
+        }
+        
+        // If no match by tvmaze_id and API show doesn't have tvmaze_id, try matching by title
+        // (We don't match by title if tvmaze_id exists to avoid overwriting different shows with same title)
+        if (!existingShow && !apiShow.tvmaze_id) {
+          existingShow = existingShows.find(
+            show => show.title.toLowerCase() === apiShow.title.toLowerCase()
+          );
+        }
         
         if (existingShow) {
           // If already in database, update it with the latest API data
