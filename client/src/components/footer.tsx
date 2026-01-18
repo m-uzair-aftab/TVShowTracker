@@ -7,7 +7,7 @@ export function Footer() {
             &copy; {new Date().getFullYear()} TV Show Tracker. All rights reserved. Built by Uzair Aftab.
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            TV data provided by TVmaze API
+            TV data provided by TVmaze API. Movie data provided by TMDB API.
           </p>
         </div>
       </div>

@@ -10,6 +10,8 @@ import { Footer } from "@/components/footer";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import ShowDetails from "@/pages/show-details";
+import MoviesHome from "@/pages/movies";
+import MovieDetails from "@/pages/movie-details";
 import AuthPage from "@/pages/auth-page";
 
 function Router() {
@@ -32,6 +34,23 @@ function Router() {
         {(params) => (
           <ProtectedRoute>
             <ShowDetails />
+          </ProtectedRoute>
+        )}
+      </Route>
+      <Route path="/movies">
+        <ProtectedRoute>
+          <MoviesHome />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/movies/search">
+        <ProtectedRoute>
+          <MoviesHome />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/movie/:id">
+        {(params) => (
+          <ProtectedRoute>
+            <MovieDetails />
           </ProtectedRoute>
         )}
       </Route>

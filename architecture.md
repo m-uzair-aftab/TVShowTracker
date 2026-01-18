@@ -1,8 +1,8 @@
-# TV Show Tracker – Architecture Overview
+# TV Show & Movies Tracker – Architecture Overview
 
 ## 1. High-Level Architecture
 
-The TV Show Tracker is a full-stack web application with:
+The TV Show & Movies Tracker is a full-stack web application with:
 
 - **Frontend:** React + TypeScript + Vite
 - **Backend:** Node.js + Express + TypeScript
@@ -59,8 +59,12 @@ The TV Show Tracker is a full-stack web application with:
 - Tables include:
   - `users` – auth credentials and profile info
   - `tv_shows` – TV show metadata
-  - `watchlist` – user–show relationships
-  - (plus season progress tables if present)
+  - `user_watchlists` – user–show relationships
+  - `season_progress` – per-season tracking
+  - `movies` – movie metadata
+  - `user_movie_lists` – user–movie relationships
+  - `movie_activity` – movie tracking (date, rating, watched using)
+  - `session` – express-session store
 - Migrations run via Drizzle
 
 ---
@@ -79,17 +83,27 @@ The TV Show Tracker is a full-stack web application with:
 
 ## 4. Data Flow
 
-### 4.1 Fetch Watchlist
+### 4.1 Fetch TV Watchlist
 1. Frontend calls `/api/watchlist` with credentials (`credentials: 'include'`)
 2. Backend validates session via cookie
-3. Queries `watchlist` joined with `tv_shows`
+3. Queries `user_watchlists` joined with `tv_shows`
 4. Returns list of shows in JSON
 5. Frontend renders via React Query
 
-### 4.2 Add to Watchlist
+### 4.2 Add to TV Watchlist
 1. Frontend `POST /api/watchlist` with show ID
 2. Backend adds entry for current user
 3. Returns updated list or success status
+
+### 4.3 Search Movies
+1. Frontend calls `/api/movies/search?query=...`
+2. Backend queries TMDB, upserts into `movies`
+3. Returns movie list to the UI
+
+### 4.4 Save Movie Activity
+1. Frontend `POST /api/movies/list/:movieId/activity`
+2. Backend stores date/rating/watchedUsing in `movie_activity`
+3. UI updates and list views reflect the new fields
 
 ---
 
@@ -99,6 +113,7 @@ The TV Show Tracker is a full-stack web application with:
 - `DATABASE_URL` – Neon Postgres connection string
 - `SESSION_SECRET` – secret for `express-session`
 - `NODE_ENV` – `production` on Render (enables secure cookies)
+- `TMDB_API_KEY` – TMDB API key for movie search and details
 
 ### Frontend (Netlify)
 - `VITE_API_BASE_URL` – base URL for API requests

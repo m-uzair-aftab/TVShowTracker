@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,6 +14,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 export function Header() {
   const { user, logoutMutation } = useAuth();
+  const [location] = useLocation();
+  const isMovieMode = location.startsWith('/movies') || location.startsWith('/movie/');
 
   const handleLogout = () => {
     logoutMutation.mutate();
@@ -33,36 +35,53 @@ export function Header() {
         <div className="flex justify-between items-center">
           <Link href="/" className="flex items-center">
             <i className="ri-tv-line text-primary text-2xl mr-2"></i>
-            <h1 className="text-xl font-semibold">TV Show Tracker</h1>
+            <h1 className="text-xl font-semibold">TV Shows & Movies Tracker</h1>
           </Link>
 
-          {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback>{getInitials()}</AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <div className="flex flex-col px-2 py-1.5">
-                  <span className="font-medium">
-                    {user.firstName && user.lastName 
-                      ? `${user.firstName} ${user.lastName}` 
-                      : user.firstName || user.lastName || 'User'}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {user.email}
-                  </span>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center bg-muted rounded-full p-1">
+              <Link
+                href="/"
+                className={`px-3 py-1 text-sm rounded-full ${!isMovieMode ? 'bg-white shadow-sm' : 'text-muted-foreground'}`}
+              >
+                TV
+              </Link>
+              <Link
+                href="/movies"
+                className={`px-3 py-1 text-sm rounded-full ${isMovieMode ? 'bg-white shadow-sm' : 'text-muted-foreground'}`}
+              >
+                Movies
+              </Link>
+            </div>
+
+            {user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback>{getInitials()}</AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <div className="flex flex-col px-2 py-1.5">
+                    <span className="font-medium">
+                      {user.firstName && user.lastName 
+                        ? `${user.firstName} ${user.lastName}` 
+                        : user.firstName || user.lastName || 'User'}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {user.email}
+                    </span>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout}>
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
         </div>
       </div>
     </header>

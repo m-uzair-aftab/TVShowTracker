@@ -1,8 +1,11 @@
 import { 
   tvShows, type TvShow, type InsertTvShow, 
+  movies, type Movie, type InsertMovie,
   users, type User, type InsertUser,
   userWatchlists, type UserWatchlist, type InsertUserWatchlist,
-  seasonProgress, type SeasonProgress, type InsertSeasonProgress
+  seasonProgress, type SeasonProgress, type InsertSeasonProgress,
+  userMovieLists, type UserMovieList, type InsertUserMovieList,
+  movieActivity, type MovieActivity, type InsertMovieActivity
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, ilike, and } from "drizzle-orm";
@@ -23,12 +26,29 @@ export interface IStorage {
   createTvShow(show: InsertTvShow): Promise<TvShow>;
   updateTvShow(id: number, show: Partial<InsertTvShow>): Promise<TvShow | undefined>;
   deleteTvShow(id: number): Promise<boolean>;
+
+  // Movie methods
+  getAllMovies(): Promise<Movie[]>;
+  searchMovies(query: string): Promise<Movie[]>;
+  getMovie(id: number): Promise<Movie | undefined>;
+  createMovie(movie: InsertMovie): Promise<Movie>;
+  updateMovie(id: number, movie: Partial<InsertMovie>): Promise<Movie | undefined>;
+  deleteMovie(id: number): Promise<boolean>;
   
   // Watchlist methods
   addToWatchlist(userId: number, showId: number): Promise<UserWatchlist>;
   removeFromWatchlist(userId: number, showId: number): Promise<boolean>;
   getUserWatchlist(userId: number): Promise<(UserWatchlist & { show: TvShow })[]>;
   getWatchlistItem(userId: number, showId: number): Promise<UserWatchlist | undefined>;
+
+  // Movie list methods
+  addToMovieList(userId: number, movieId: number): Promise<UserMovieList>;
+  removeFromMovieList(userId: number, movieId: number): Promise<boolean>;
+  getUserMovieList(userId: number): Promise<(UserMovieList & { movie: Movie })[]>;
+  getUserMovieListWithActivity(userId: number): Promise<(UserMovieList & { movie: Movie, activity: MovieActivity | null })[]>;
+  getMovieListItem(userId: number, movieId: number): Promise<UserMovieList | undefined>;
+  getMovieActivity(movieListId: number): Promise<MovieActivity | undefined>;
+  updateMovieActivity(movieListId: number, activity: Partial<InsertMovieActivity>): Promise<MovieActivity>;
   
   // Season progress methods
   getSeasonProgress(watchlistId: number, seasonNumber?: number): Promise<SeasonProgress[]>;
@@ -92,6 +112,42 @@ export class DatabaseStorage implements IStorage {
   
   async deleteTvShow(id: number): Promise<boolean> {
     const result = await db.delete(tvShows).where(eq(tvShows.id, id));
+    return !!result;
+  }
+
+  // Movie methods
+  async getAllMovies(): Promise<Movie[]> {
+    return await db.select().from(movies);
+  }
+
+  async searchMovies(query: string): Promise<Movie[]> {
+    const searchPattern = `%${query}%`;
+    return await db.select().from(movies).where(
+      ilike(movies.title, searchPattern)
+    );
+  }
+
+  async getMovie(id: number): Promise<Movie | undefined> {
+    const result = await db.select().from(movies).where(eq(movies.id, id));
+    return result[0];
+  }
+
+  async createMovie(insertMovie: InsertMovie): Promise<Movie> {
+    const [movie] = await db.insert(movies).values(insertMovie).returning();
+    return movie;
+  }
+
+  async updateMovie(id: number, updateData: Partial<InsertMovie>): Promise<Movie | undefined> {
+    const [updatedMovie] = await db.update(movies)
+      .set(updateData)
+      .where(eq(movies.id, id))
+      .returning();
+
+    return updatedMovie;
+  }
+
+  async deleteMovie(id: number): Promise<boolean> {
+    const result = await db.delete(movies).where(eq(movies.id, id));
     return !!result;
   }
   
@@ -204,6 +260,116 @@ export class DatabaseStorage implements IStorage {
       );
       
     return result[0];
+  }
+
+  // Movie list methods
+  async addToMovieList(userId: number, movieId: number): Promise<UserMovieList> {
+    const existing = await this.getMovieListItem(userId, movieId);
+    if (existing) {
+      return existing;
+    }
+
+    const [listItem] = await db.insert(userMovieLists)
+      .values({ userId, movieId })
+      .returning();
+
+    return listItem;
+  }
+
+  async removeFromMovieList(userId: number, movieId: number): Promise<boolean> {
+    const listItem = await this.getMovieListItem(userId, movieId);
+    if (!listItem) {
+      return false;
+    }
+
+    await db.delete(movieActivity)
+      .where(eq(movieActivity.movieListId, listItem.id));
+
+    const result = await db.delete(userMovieLists)
+      .where(
+        and(
+          eq(userMovieLists.userId, userId),
+          eq(userMovieLists.movieId, movieId)
+        )
+      );
+
+    return !!result;
+  }
+
+  async getUserMovieList(userId: number): Promise<(UserMovieList & { movie: Movie })[]> {
+    const result = await db.select({
+      list: userMovieLists,
+      movie: movies
+    })
+    .from(userMovieLists)
+    .innerJoin(movies, eq(userMovieLists.movieId, movies.id))
+    .where(eq(userMovieLists.userId, userId));
+
+    return result.map(item => ({
+      ...item.list,
+      movie: item.movie
+    }));
+  }
+
+  async getUserMovieListWithActivity(userId: number): Promise<(UserMovieList & { movie: Movie, activity: MovieActivity | null })[]> {
+    const result = await db.select({
+      list: userMovieLists,
+      movie: movies,
+      activity: movieActivity
+    })
+    .from(userMovieLists)
+    .innerJoin(movies, eq(userMovieLists.movieId, movies.id))
+    .leftJoin(movieActivity, eq(movieActivity.movieListId, userMovieLists.id))
+    .where(eq(userMovieLists.userId, userId));
+
+    return result.map(item => ({
+      ...item.list,
+      movie: item.movie,
+      activity: item.activity ?? null
+    }));
+  }
+
+  async getMovieListItem(userId: number, movieId: number): Promise<UserMovieList | undefined> {
+    const result = await db.select()
+      .from(userMovieLists)
+      .where(
+        and(
+          eq(userMovieLists.userId, userId),
+          eq(userMovieLists.movieId, movieId)
+        )
+      );
+
+    return result[0];
+  }
+
+  async getMovieActivity(movieListId: number): Promise<MovieActivity | undefined> {
+    const result = await db.select()
+      .from(movieActivity)
+      .where(eq(movieActivity.movieListId, movieListId));
+
+    return result[0];
+  }
+
+  async updateMovieActivity(movieListId: number, activityData: Partial<InsertMovieActivity>): Promise<MovieActivity> {
+    const existing = await this.getMovieActivity(movieListId);
+
+    if (existing) {
+      const [updated] = await db.update(movieActivity)
+        .set(activityData)
+        .where(eq(movieActivity.movieListId, movieListId))
+        .returning();
+
+      return updated;
+    }
+
+    const [created] = await db.insert(movieActivity)
+      .values({
+        movieListId,
+        ...activityData
+      })
+      .returning();
+
+    return created;
   }
   
   // Season progress methods

@@ -4,9 +4,18 @@ import { useToast } from '@/hooks/use-toast';
 interface SearchFormProps {
   onSearch: (query: string) => void;
   isLoading: boolean;
+  placeholder?: string;
+  helperText?: string;
+  emptyDescription?: string;
 }
 
-export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
+export function SearchForm({
+  onSearch,
+  isLoading,
+  placeholder = "Enter a TV show name...",
+  helperText = 'Try searching for "Breaking Bad", "Stranger Things", etc.',
+  emptyDescription = "Please enter a TV show name to search"
+}: SearchFormProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const { toast } = useToast();
 
@@ -16,7 +25,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
     if (!searchQuery.trim()) {
       toast({
         title: "Search field is empty",
-        description: "Please enter a TV show name to search",
+        description: emptyDescription,
         variant: "destructive",
       });
       return;
@@ -31,7 +40,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
         <input 
           type="text" 
           className="w-full px-4 py-3 pr-12 rounded-lg border border-gray-300 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-shadow bg-white text-text placeholder-gray-400"
-          placeholder="Enter a TV show name..." 
+          placeholder={placeholder}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           disabled={isLoading}
@@ -45,7 +54,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
         </button>
       </div>
       <div className="text-xs text-gray-700 mt-2 pl-1">
-        Try searching for "Breaking Bad", "Stranger Things", etc.
+        {helperText}
       </div>
     </form>
   );

@@ -6,12 +6,14 @@ import { setupAuth, authHybrid } from "./auth";
 import { 
   searchTvShowSchema, 
   insertTvShowSchema, 
-  insertUserWatchlistSchema,
-  insertSeasonProgressSchema,
-  seasonProgressValidationSchema
+  seasonProgressValidationSchema,
+  searchMovieSchema,
+  insertMovieSchema,
+  movieActivityValidationSchema
 } from "@shared/schema";
 import { z } from "zod";
 import { searchShows, getShowDetails } from "./tvmaze-api";
+import { searchMovies, getMovieDetails } from "./tmdb-api";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
@@ -132,6 +134,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: error.errors[0].message });
       }
       res.status(500).json({ message: "Failed to create TV show" });
+    }
+  });
+
+  // Search Movies
+  app.get("/api/movies/search", async (req, res) => {
+    try {
+      const parsedQuery = searchMovieSchema.parse({
+        query: req.query.query,
+      });
+
+      if (!parsedQuery.query) {
+        const movies = await storage.getAllMovies();
+        return res.json(movies);
+      }
+
+      const apiMovies = await searchMovies(parsedQuery.query);
+      const existingMovies = await storage.getAllMovies();
+      const results = [];
+
+      for (const apiMovie of apiMovies) {
+        let existingMovie: typeof existingMovies[0] | undefined;
+
+        if (apiMovie.tmdb_id) {
+          existingMovie = existingMovies.find(
+            movie => movie.tmdb_id === apiMovie.tmdb_id
+          );
+        }
+
+        if (!existingMovie && !apiMovie.tmdb_id) {
+          existingMovie = existingMovies.find(
+            movie => movie.title.toLowerCase() === apiMovie.title.toLowerCase()
+          );
+        }
+
+        if (existingMovie) {
+          const updatedMovie = await storage.updateMovie(existingMovie.id, apiMovie);
+          results.push(updatedMovie || existingMovie);
+        } else {
+          const newMovie = await storage.createMovie(apiMovie);
+          results.push(newMovie);
+        }
+      }
+
+      res.json(results);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      console.error("Movie search error:", error);
+      res.status(500).json({ message: "Failed to search for movies" });
+    }
+  });
+
+  // Get Movie by ID
+  app.get("/api/movies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid ID format" });
+      }
+
+      const movie = await storage.getMovie(id);
+      if (!movie) {
+        return res.status(404).json({ message: "Movie not found" });
+      }
+
+      if (movie.tmdb_id) {
+        try {
+          const updatedMovieData = await getMovieDetails(movie.tmdb_id);
+          const updatedMovie = await storage.updateMovie(id, updatedMovieData);
+          return res.json(updatedMovie || movie);
+        } catch (apiError) {
+          console.warn("Could not update movie from TMDB API:", apiError);
+          return res.json(movie);
+        }
+      }
+
+      res.json(movie);
+    } catch (error) {
+      console.error("Error retrieving movie:", error);
+      res.status(500).json({ message: "Failed to retrieve movie" });
+    }
+  });
+
+  // Create Movie route (for future use)
+  app.post("/api/movies", async (req, res) => {
+    try {
+      const newMovie = insertMovieSchema.parse(req.body);
+      const movie = await storage.createMovie(newMovie);
+      res.status(201).json(movie);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Failed to create movie" });
     }
   });
 
@@ -296,6 +393,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       res.status(500).json({ message: "Failed to update season progress" });
+    }
+  });
+
+  // Movie list routes
+  app.post("/api/movies/list", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const { movieId } = req.body;
+
+      if (!movieId || typeof movieId !== 'number') {
+        return res.status(400).json({ message: "Valid movie ID is required" });
+      }
+
+      const movie = await storage.getMovie(movieId);
+      if (!movie) {
+        return res.status(404).json({ message: "Movie not found" });
+      }
+
+      const listItem = await storage.addToMovieList(userId, movieId);
+      res.status(201).json(listItem);
+    } catch (error) {
+      console.error("Error adding movie to list:", error);
+      res.status(500).json({ message: "Failed to add movie to list" });
+    }
+  });
+
+  app.get("/api/movies/list", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const list = await storage.getUserMovieList(userId);
+      res.json(list);
+    } catch (error) {
+      console.error("Error getting movie list:", error);
+      res.status(500).json({ message: "Failed to retrieve movie list" });
+    }
+  });
+
+  app.get("/api/movies/list/mylist", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const listWithActivity = await storage.getUserMovieListWithActivity(userId);
+      res.json(listWithActivity);
+    } catch (error) {
+      console.error("Error getting movie list with activity:", error);
+      res.status(500).json({ message: "Failed to retrieve movie list" });
+    }
+  });
+
+  app.get("/api/movies/list/check/:movieId", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const movieId = parseInt(req.params.movieId, 10);
+
+      if (isNaN(movieId)) {
+        return res.status(400).json({ message: "Invalid movie ID" });
+      }
+
+      const listItem = await storage.getMovieListItem(userId, movieId);
+      res.json({ inList: !!listItem, listItem });
+    } catch (error) {
+      console.error("Error checking movie list status:", error);
+      res.status(500).json({ message: "Failed to check movie list status" });
+    }
+  });
+
+  app.delete("/api/movies/list/:movieId", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const movieId = parseInt(req.params.movieId, 10);
+
+      if (isNaN(movieId)) {
+        return res.status(400).json({ message: "Invalid movie ID" });
+      }
+
+      const removed = await storage.removeFromMovieList(userId, movieId);
+      res.json({ success: removed });
+    } catch (error) {
+      console.error("Error removing movie from list:", error);
+      res.status(500).json({ message: "Failed to remove movie from list" });
+    }
+  });
+
+  app.get("/api/movies/list/:movieId/activity", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const movieId = parseInt(req.params.movieId, 10);
+
+      if (isNaN(movieId)) {
+        return res.status(400).json({ message: "Invalid movie ID" });
+      }
+
+      const listItem = await storage.getMovieListItem(userId, movieId);
+      if (!listItem) {
+        return res.status(404).json({ message: "Movie not in list" });
+      }
+
+      const activity = await storage.getMovieActivity(listItem.id);
+      res.json(activity || null);
+    } catch (error) {
+      console.error("Error getting movie activity:", error);
+      res.status(500).json({ message: "Failed to get movie activity" });
+    }
+  });
+
+  app.post("/api/movies/list/:movieId/activity", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const movieId = parseInt(req.params.movieId, 10);
+
+      if (isNaN(movieId)) {
+        return res.status(400).json({ message: "Invalid movie ID" });
+      }
+
+      const listItem = await storage.getMovieListItem(userId, movieId);
+      if (!listItem) {
+        return res.status(404).json({ message: "Movie not in list" });
+      }
+
+      const parsedActivity = movieActivityValidationSchema.parse(req.body);
+      const updated = await storage.updateMovieActivity(listItem.id, parsedActivity);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating movie activity:", error);
+
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+
+      res.status(500).json({ message: "Failed to update movie activity" });
     }
   });
 
