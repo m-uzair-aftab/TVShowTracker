@@ -99,7 +99,7 @@ export function MyTVShows() {
   // Helper function to format date
   const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return 'Not set';
-    return format(new Date(dateString), 'MMM d, yyyy');
+    return format(new Date(dateString + 'T00:00:00'), 'MMM d, yyyy');
   };
 
   // Count watched seasons (any season with start date)
@@ -124,8 +124,8 @@ export function MyTVShows() {
     return shows.filter(show => {
       // Check if any season has a start or finish date in the selected year
       return show.seasons.some(season => {
-        const startDate = season.startDate ? new Date(season.startDate) : null;
-        const finishDate = season.finishDate ? new Date(season.finishDate) : null;
+        const startDate = season.startDate ? new Date(season.startDate + 'T00:00:00') : null;
+        const finishDate = season.finishDate ? new Date(season.finishDate + 'T00:00:00') : null;
         
         const startYear = startDate ? startDate.getFullYear().toString() : null;
         const finishYear = finishDate ? finishDate.getFullYear().toString() : null;

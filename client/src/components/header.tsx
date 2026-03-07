@@ -35,24 +35,26 @@ export function Header() {
         <div className="flex justify-between items-center">
           <Link href="/" className="flex items-center">
             <i className="ri-tv-line text-primary text-2xl mr-2"></i>
-            <h1 className="text-xl font-semibold">TV Shows & Movies Tracker</h1>
+            <h1 className="text-xl font-semibold">TV & Movies Tracker</h1>
           </Link>
 
           <div className="flex items-center gap-4">
-            <div className="flex items-center bg-muted rounded-full p-1">
-              <Link
-                href="/"
-                className={`px-3 py-1 text-sm rounded-full ${!isMovieMode ? 'bg-white shadow-sm' : 'text-muted-foreground'}`}
-              >
-                TV
-              </Link>
-              <Link
-                href="/movies"
-                className={`px-3 py-1 text-sm rounded-full ${isMovieMode ? 'bg-white shadow-sm' : 'text-muted-foreground'}`}
-              >
-                Movies
-              </Link>
-            </div>
+            {user && (
+              <div className="flex items-center bg-muted rounded-full p-1">
+                <Link
+                  href="/"
+                  className={`px-3 py-1 text-sm rounded-full ${!isMovieMode ? 'bg-white shadow-sm' : 'text-muted-foreground'}`}
+                >
+                  TV
+                </Link>
+                <Link
+                  href="/movies"
+                  className={`px-3 py-1 text-sm rounded-full ${isMovieMode ? 'bg-white shadow-sm' : 'text-muted-foreground'}`}
+                >
+                  Movies
+                </Link>
+              </div>
+            )}
 
             {user ? (
               <DropdownMenu>

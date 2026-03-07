@@ -24,8 +24,8 @@ export function SeasonProgressView({
   onEdit
 }: SeasonProgressViewProps) {
   // Format dates for display
-  const startDate = data.startDate ? format(new Date(data.startDate), 'MMM dd, yyyy') : 'Not set';
-  const finishDate = data.finishDate ? format(new Date(data.finishDate), 'MMM dd, yyyy') : 'Not set';
+  const startDate = data.startDate ? format(new Date(data.startDate + 'T00:00:00'), 'MMM dd, yyyy') : 'Not set';
+  const finishDate = data.finishDate ? format(new Date(data.finishDate + 'T00:00:00'), 'MMM dd, yyyy') : 'Not set';
   
   return (
     <Card className="mb-4">

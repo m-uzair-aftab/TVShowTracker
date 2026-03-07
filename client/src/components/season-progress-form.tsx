@@ -25,6 +25,12 @@ interface SeasonProgressFormProps {
   isSaving?: boolean;
 }
 
+// Parse a YYYY-MM-DD string as a local-time Date (avoids UTC midnight → previous day in local TZ)
+function parseDateLocal(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 // Helper function to calculate grade based on rating
 function calculateGrade(rating: number | null): string | null {
   if (rating === null || rating === 0) return null;
@@ -51,10 +57,10 @@ export function SeasonProgressForm({
   isSaving = false
 }: SeasonProgressFormProps) {
   const [startDate, setStartDate] = useState<Date | undefined>(
-    initialData?.startDate ? new Date(initialData.startDate) : undefined
+    initialData?.startDate ? parseDateLocal(initialData.startDate) : undefined
   );
   const [finishDate, setFinishDate] = useState<Date | undefined>(
-    initialData?.finishDate ? new Date(initialData.finishDate) : undefined
+    initialData?.finishDate ? parseDateLocal(initialData.finishDate) : undefined
   );
   const [rating, setRating] = useState<string>(
     initialData?.rating ? initialData.rating.toString() : ''
@@ -145,11 +151,10 @@ export function SeasonProgressForm({
     // Calculate grade based on rating
     const gradeValue = calculateGrade(ratingNum || null);
     
-    // Convert dates to ISO strings for API
     onSave({
       seasonNumber,
-      startDate: startDate ? startDate.toISOString() : null,
-      finishDate: finishDate ? finishDate.toISOString() : null,
+      startDate: startDate ? format(startDate, 'yyyy-MM-dd') : null,
+      finishDate: finishDate ? format(finishDate, 'yyyy-MM-dd') : null,
       grade: gradeValue,
       rating: ratingNum || null
     });

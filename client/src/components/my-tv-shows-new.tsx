@@ -96,7 +96,7 @@ export function MyTVShows() {
   // Helper function to format date
   const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return 'Not set';
-    return format(new Date(dateString), 'MMM d, yyyy');
+    return format(new Date(dateString + 'T00:00:00'), 'MMM d, yyyy');
   };
 
   // Count watched seasons (any season with start date)

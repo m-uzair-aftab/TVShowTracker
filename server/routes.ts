@@ -368,15 +368,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate progress data
       const progressData = req.body;
       
-      // Convert date strings to Date objects if they exist
-      if (progressData.startDate) {
-        progressData.startDate = new Date(progressData.startDate);
-      }
-      
-      if (progressData.finishDate) {
-        progressData.finishDate = new Date(progressData.finishDate);
-      }
-      
       // Update progress
       const updatedProgress = await storage.updateSeasonProgress(
         watchlistItem.id,
