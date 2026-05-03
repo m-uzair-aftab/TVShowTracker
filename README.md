@@ -1,30 +1,22 @@
 # TVShowTracker
 
-A full-stack web application for tracking TV shows with hybrid authentication support.
+TVShowTracker is a full-stack web app for keeping track of TV shows and movies. It lets users search for titles, save them to personal lists, record progress and ratings, and share a read-only public version of their list.
 
-## Environment Variables
+The app includes:
 
-### Backend (Server)
-- `DATABASE_URL` - Neon Postgres connection string
-- `SESSION_SECRET` - Secret for express-session
-- `JWT_SECRET` - Secret for JWT tokens (can use SESSION_SECRET as fallback)
-- `NODE_ENV` - Environment (production/development)
+- TV show tracking with season progress, watched seasons, ratings, and year filters.
+- Movie tracking with ratings, watched dates, sorting, filtering, and CSV export.
+- Account-based personal lists.
+- Public shared-list pages that can be viewed without signing in.
 
-### Frontend (Client)
-- `VITE_API_BASE_URL` - Base URL for API requests
+You can use TVShowTracker here: https://tvshowtracker.netlify.app/
 
-## Authentication
+You can see Uzair Aftab's shared list here: https://tvshowtracker.netlify.app/uzairaftab/shared-list
 
-This app supports **hybrid authentication**:
-- **JWT Tokens** (primary) - Stored in localStorage, sent via Authorization header
-- **Session Cookies** (fallback) - Traditional express-session for backward compatibility
+## Tech Stack
 
-This approach ensures compatibility with iOS Safari while maintaining existing functionality.
-
-## Setup
-
-1. Install dependencies: `npm install`
-2. Set environment variables
-3. Run database migrations: `npm run db:push`
-4. Start development server: `npm run dev`
-
+- React, Vite, and TypeScript
+- Express and Node.js
+- Drizzle ORM and Neon Postgres
+- Tailwind CSS and shadcn/ui-style components
+- TVmaze and TMDB data APIs

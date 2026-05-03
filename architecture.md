@@ -1,177 +1,70 @@
-# TV Show & Movies Tracker – Architecture Overview
+# Architecture Overview
 
-## 1. High-Level Architecture
+TVShowTracker is a full-stack application for tracking TV shows and movies.
 
-The TV Show & Movies Tracker is a full-stack web application with:
+## High-Level Stack
 
-- **Frontend:** React + TypeScript + Vite
-- **Backend:** Node.js + Express + TypeScript
-- **Database:** Neon Postgres (via Drizzle ORM)
-- **Hosting:**
-  - **Backend:** Render
-  - **Frontend:** Netlify
-- **Auth:** Cookie-based session management (Express session stored in Postgres)
+- Frontend: React, TypeScript, Vite, TanStack Query, Tailwind CSS
+- Backend: Node.js, Express, TypeScript
+- Database: Postgres through Drizzle ORM
+- Hosting: Netlify for the frontend and a Node-capable backend host
+- External data: TVmaze for TV shows and TMDB for movies
 
----
+## Frontend
 
-## 2. Components
+The frontend lives in `client/`.
 
-### 2.1 Frontend (Netlify)
-- Located in `/client`
-- Bundled with **Vite** for fast builds
-- Uses:
-  - `@tanstack/react-query` for data fetching + caching (with a **default queryFn**)
-  - (Your router) for navigation
-  - `use-auth` custom hook for auth state
-  - `API_BASE_URL` env var injected at build time
-- Communicates with backend via `fetch` calls to `${API_BASE_URL}/api/...`
+Key responsibilities:
 
-#### 2.1.1 Frontend State Management
-- **React Query** for server state:
-  - Central **default queryFn** prefixes `${API_BASE_URL}`, adds `credentials`, parses JSON
-  - Consistent `queryKey` convention: `['/api/path', { params… }]`
-  - Optimistic updates (e.g., for watchlist) where applicable
-- Custom hooks:
-  - `useAuth` – authentication state and operations (login, logout, register)
-  - (Remove this bullet if not present) `useMobile` – responsive helpers
-  - (Remove this bullet if not present) `useNavigationContext` – navigation state
+- Route users through account, TV, movie, settings, and public shared-list pages.
+- Fetch API data through shared query helpers.
+- Store authenticated user state with TanStack Query.
+- Render personal list views and read-only public shared-list views.
 
-#### 2.1.2 API Utilities
-- Centralized helpers in **`client/src/lib/queryClient.ts`**:
-  - `apiRequest(method, path, data?)`
-  - `getQueryFn()` returned to React Query defaults
+## Backend
 
-### 2.2 Backend (Render)
-- Located in `/server`
-- **Express** server; routes under `/api/...`
-- **Sessions**: `express-session` with **Postgres store** via `connect-pg-simple`
-  - Cookie options in production: `httpOnly: true`, `sameSite: 'none'`, `secure: true`
-  - `app.set('trust proxy', 1)` for Render
-- **CORS** configured to allow:
-  - Local dev (`http://localhost:5173`)
-  - Production Netlify site (exact origin)
-  - `credentials: true`
-- (Optional) Can serve `dist/public` if present, but in production the SPA is hosted on **Netlify**
+The backend lives in `server/`.
 
-### 2.3 Database (Neon Postgres)
-- Managed Postgres instance (Neon)
-- Accessed via `drizzle-orm` (Neon serverless driver)
-- Tables include:
-  - `users` – auth credentials and profile info
-  - `tv_shows` – TV show metadata
-  - `user_watchlists` – user–show relationships
-  - `season_progress` – per-season tracking
-  - `movies` – movie metadata
-  - `user_movie_lists` – user–movie relationships
-  - `movie_activity` – movie tracking (date, rating, watched using)
-  - `session` – express-session store
-- Migrations run via Drizzle
+Key responsibilities:
 
----
+- Expose API routes under `/api`.
+- Authenticate users with JWT bearer tokens and session fallback support.
+- Store user lists, ratings, progress, and sharing settings.
+- Fetch and normalize TVmaze and TMDB search/detail data.
 
-## 3. Authentication Flow (Current Implementation)
+## Database
 
-- User logs in via `/api/auth/login`
-- Backend verifies credentials, creates a session, and sets an **HTTP-only secure cookie**
-- Browser automatically sends the cookie with subsequent API calls
-- Logout clears the session on the server and removes the cookie
-- No tokens are stored in `localStorage` or `sessionStorage`
+The schema is defined in `shared/schema.ts` and managed with Drizzle.
 
-> Note: Because frontend and backend are on different domains (Netlify ⇆ Render), production cookies use `sameSite: 'none'` and `secure: true`. iOS Safari requires this.
+Important data areas include:
 
----
+- Users and authentication
+- TV show metadata
+- User TV watchlists and season progress
+- Movie metadata
+- User movie lists and movie activity
+- Public share settings
+- Session storage
 
-## 4. Data Flow
+## Public Shared Lists
 
-### 4.1 Fetch TV Watchlist
-1. Frontend calls `/api/watchlist` with credentials (`credentials: 'include'`)
-2. Backend validates session via cookie
-3. Queries `user_watchlists` joined with `tv_shows`
-4. Returns list of shows in JSON
-5. Frontend renders via React Query
+Users can enable sharing from Settings. Public list URLs use this shape:
 
-### 4.2 Add to TV Watchlist
-1. Frontend `POST /api/watchlist` with show ID
-2. Backend adds entry for current user
-3. Returns updated list or success status
-
-### 4.3 Search Movies
-1. Frontend calls `/api/movies/search?query=...`
-2. Backend queries TMDB, upserts into `movies`
-3. Returns movie list to the UI
-
-### 4.4 Save Movie Activity
-1. Frontend `POST /api/movies/list/:movieId/activity`
-2. Backend stores date/rating/watchedUsing in `movie_activity`
-3. UI updates and list views reflect the new fields
-
----
-
-## 5. Environment Variables
-
-### Backend (Render)
-- `DATABASE_URL` – Neon Postgres connection string
-- `SESSION_SECRET` – secret for `express-session`
-- `NODE_ENV` – `production` on Render (enables secure cookies)
-- `TMDB_API_KEY` – TMDB API key for movie search and details
-
-### Frontend (Netlify)
-- `VITE_API_BASE_URL` – base URL for API requests
-
----
-
-## 6. Directory Structure
 ```txt
-root/
-  client/                 # React frontend
-    src/
-      hooks/              # Custom React hooks (e.g., use-auth.tsx)
-      components/         # UI components
-      lib/                # queryClient.ts (apiRequest, default queryFn)
-      config.ts           # API_BASE_URL setup
-      main.tsx            # App entry
-  server/                 # Express backend
-    index.ts              # Main server entry point
-    routes/               # API route handlers
-    db/                   # Drizzle schema + queries
-  shared/                 # (If used) shared types/utilities
-  dist/public/            # Frontend build output (optional on server)
+/:username/shared-list
 ```
 
-## 7. Flow Diagrams
-### 7.1 Login Flow
-```
-[User] -> [Frontend: Login Form]
-    POST /api/auth/login  (credentials: 'include')
-    -> [Backend] Verify in DB
-    -> Set HTTP-only cookie
-    -> Return user JSON
-    -> [Frontend] Cache user via use-auth/react-query
-```
+Public shared-list pages are read-only and hide private edit controls.
 
-### 7.2 Fetch Watchlist
-```
-[User visits Watchlist page]
-    -> [Frontend] useQuery(['/api/watchlist'])
-    -> [Default queryFn] fetch(API_BASE_URL + '/api/watchlist', { credentials: 'include' })
-    -> [Backend] Check session cookie
-    -> Query DB
-    -> Return watchlist JSON
-    -> [Frontend] render list
-```
+## Environment Variables
 
-### 7.3 Logout
-```
-[User clicks Logout]
-    -> [Frontend] POST /api/auth/logout
-    -> [Backend] destroy session + clear cookie
-    -> [Frontend] clear cached '/api/auth/me' + redirect to login
-```
+Required production values should be configured through the deployment provider:
 
-## 8. Key Points
+- `DATABASE_URL`
+- `SESSION_SECRET`
+- `JWT_SECRET`
+- `TMDB_API_KEY`
+- `NODE_ENV`
+- `VITE_API_BASE_URL`
 
-- All API calls from the frontend must set credentials: 'include'
-- API base URL is determined by VITE_API_BASE_URL at build time
-- CORS on backend must list exact origins (local + Netlify) and credentials: true
-- Apply DB migrations to Neon before deploying backend changes
-- Session cookies: httpOnly, secure in prod, sameSite: 'none' for cross-site
+Local values belong in `.env`, which is ignored by Git.

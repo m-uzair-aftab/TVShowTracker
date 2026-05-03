@@ -18,15 +18,24 @@ declare global {
   }
 }
 
+function getAuthSecret() {
+  const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET or SESSION_SECRET must be set in production');
+  }
+  return 'tv-tracker-local-dev-secret';
+}
+
 // JWT token functions
 export function signToken(userId: number) {
-  const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET || 'dev-only-placeholder';
+  const secret = getAuthSecret();
   return jwt.sign({ userId }, secret, { expiresIn: '7d' });
 }
 
 export function verifyToken(token: string): { userId: number } | null {
   try {
-    const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET || 'dev-only-placeholder';
+    const secret = getAuthSecret();
     return jwt.verify(token, secret) as { userId: number };
   } catch {
     return null;
@@ -59,7 +68,7 @@ export function setupAuth(app: express.Express) {
   // Setup session middleware
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || 'dev-only-placeholder',
+      secret: getAuthSecret(),
       resave: false,
       saveUninitialized: false,
       cookie: {

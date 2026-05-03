@@ -5,10 +5,11 @@ import {
   userWatchlists, type UserWatchlist, type InsertUserWatchlist,
   seasonProgress, type SeasonProgress, type InsertSeasonProgress,
   userMovieLists, type UserMovieList, type InsertUserMovieList,
-  movieActivity, type MovieActivity, type InsertMovieActivity
+  movieActivity, type MovieActivity, type InsertMovieActivity,
+  userShareSettings, type UserShareSettings
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, ilike, and } from "drizzle-orm";
+import { eq, ilike, and, sql } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -18,6 +19,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserUsername(userId: number, username: string | null): Promise<User | undefined>;
   
   // TV Show methods
   getAllTvShows(): Promise<TvShow[]>;
@@ -53,30 +55,105 @@ export interface IStorage {
   // Season progress methods
   getSeasonProgress(watchlistId: number, seasonNumber?: number): Promise<SeasonProgress[]>;
   updateSeasonProgress(watchlistId: number, seasonNumber: number, progress: Partial<InsertSeasonProgress>): Promise<SeasonProgress>;
+
+  // Share settings methods
+  getUserShareSettings(userId: number): Promise<UserShareSettings | undefined>;
+  getOrCreateUserShareSettings(userId: number): Promise<UserShareSettings>;
+  updateUserShareSettings(userId: number, settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears">>): Promise<UserShareSettings>;
+  getUserActivityYears(userId: number): Promise<string[]>;
 }
 
 export class DatabaseStorage implements IStorage {
+  private isMissingUsernameColumnError(error: unknown): boolean {
+    return typeof error === "object"
+      && error !== null
+      && "code" in error
+      && (error as { code?: string }).code === "42703"
+      && error instanceof Error
+      && error.message.includes("username");
+  }
+
+  private async getUserWithoutUsername(whereClause: ReturnType<typeof eq>): Promise<User | undefined> {
+    const result = await db.select({
+      id: users.id,
+      email: users.email,
+      username: sql<string | null>`null`,
+      password: users.password,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(whereClause);
+
+    return result[0];
+  }
+
   // User methods
   async getUser(id: number): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.id, id));
-    return result[0];
+    try {
+      const result = await db.select().from(users).where(eq(users.id, id));
+      return result[0];
+    } catch (error) {
+      if (this.isMissingUsernameColumnError(error)) {
+        return this.getUserWithoutUsername(eq(users.id, id));
+      }
+      throw error;
+    }
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    // This is kept for backward compatibility but now uses email
-    // Since we've updated the schema to use email instead of username
-    const result = await db.select().from(users).where(eq(users.email, username));
-    return result[0];
+    try {
+      const result = await db.select().from(users).where(eq(users.username, username));
+      return result[0];
+    } catch (error) {
+      if (this.isMissingUsernameColumnError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.email, email));
-    return result[0];
+    try {
+      const result = await db.select().from(users).where(eq(users.email, email));
+      return result[0];
+    } catch (error) {
+      if (this.isMissingUsernameColumnError(error)) {
+        return this.getUserWithoutUsername(eq(users.email, email));
+      }
+      throw error;
+    }
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+    try {
+      const [user] = await db.insert(users).values(insertUser).returning();
+      return user;
+    } catch (error) {
+      if (this.isMissingUsernameColumnError(error)) {
+        const [user] = await db.insert(users).values(insertUser).returning({
+          id: users.id,
+          email: users.email,
+          username: sql<string | null>`null`,
+          password: users.password,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          createdAt: users.createdAt,
+        });
+        return user;
+      }
+      throw error;
+    }
+  }
+
+  async updateUserUsername(userId: number, username: string | null): Promise<User | undefined> {
+    const [updatedUser] = await db.update(users)
+      .set({ username })
+      .where(eq(users.id, userId))
+      .returning();
+
+    return updatedUser;
   }
   
   // TV Show methods
@@ -423,6 +500,71 @@ export class DatabaseStorage implements IStorage {
         
       return newProgress;
     }
+  }
+
+  async getUserShareSettings(userId: number): Promise<UserShareSettings | undefined> {
+    const result = await db.select()
+      .from(userShareSettings)
+      .where(eq(userShareSettings.userId, userId));
+
+    return result[0];
+  }
+
+  async getOrCreateUserShareSettings(userId: number): Promise<UserShareSettings> {
+    const existing = await this.getUserShareSettings(userId);
+    if (existing) {
+      return existing;
+    }
+
+    const [created] = await db.insert(userShareSettings)
+      .values({
+        userId,
+        enabled: false,
+        includeAllYears: true,
+        sharedYears: [],
+      })
+      .returning();
+
+    return created;
+  }
+
+  async updateUserShareSettings(
+    userId: number,
+    settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears">>
+  ): Promise<UserShareSettings> {
+    await this.getOrCreateUserShareSettings(userId);
+
+    const [updated] = await db.update(userShareSettings)
+      .set({
+        ...settings,
+        updatedAt: new Date(),
+      })
+      .where(eq(userShareSettings.userId, userId))
+      .returning();
+
+    return updated;
+  }
+
+  async getUserActivityYears(userId: number): Promise<string[]> {
+    const years = new Set<string>();
+
+    const shows = await this.getUserWatchlistWithActivity(userId);
+    for (const item of shows) {
+      for (const season of item.seasons) {
+        const startYear = season.startDate?.slice(0, 4);
+        const finishYear = season.finishDate?.slice(0, 4);
+        if (startYear) years.add(startYear);
+        if (finishYear) years.add(finishYear);
+      }
+    }
+
+    const movieList = await this.getUserMovieListWithActivity(userId);
+    for (const item of movieList) {
+      const watchedYear = item.activity?.dateWatched?.slice(0, 4);
+      if (watchedYear) years.add(watchedYear);
+    }
+
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
   }
 }
 

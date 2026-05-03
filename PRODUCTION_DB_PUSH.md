@@ -1,93 +1,47 @@
-TVShowTracker — Production DB Schema Push (Windows CMD)
-=====================================================
+# Production Database Schema Push
 
-Goal
-----
-Run your Drizzle “db:push” command from your Windows Command Prompt (cmd.exe)
-so it applies the latest schema from your code to your PRODUCTION database.
+Use this checklist when applying Drizzle schema changes to a production database.
 
-When to do this
----------------
-- After you change your database schema (tables/columns/indexes) in code.
-- Ideally right after you deploy (or right before, as long as the schema code you’re running
-  locally matches what you’re deploying).
+## When To Run
 
-Important safety notes
-----------------------
-- This will modify your PRODUCTION database schema.
-- Double-check you are using the PRODUCTION DATABASE_URL (not local/dev).
-- Preferably create a DB backup or snapshot first (if your DB provider supports it).
+Run a production schema push after code changes modify tables, columns, indexes, or constraints.
 
-Prereqs
--------
-- You have the production database connection string (DATABASE_URL), e.g. from Neon.
-- You can run node/npm in this repo (npm install has already worked for you).
+## Safety Checklist
 
-Step-by-step (CMD)
-------------------
-1) Open Command Prompt (cmd.exe)
+- Confirm the deployed code expects the same schema you are about to push.
+- Confirm `DATABASE_URL` points to production only for the command that needs it.
+- Prefer a database backup or provider snapshot first.
+- Do not commit production database URLs or credentials.
+- Do not use destructive flags unless you have reviewed the generated changes.
 
-2) cd into your project folder
-   Example:
-   cd <project-root>
+## Run The Push
 
-   If your backend is in a subfolder (monorepo), cd into that backend folder instead.
+Install dependencies if needed:
 
-3) Set DATABASE_URL for THIS CMD WINDOW ONLY
-   Use the safe quoting form below (recommended):
+```bash
+npm install
+```
 
-   set "DATABASE_URL=YOUR_PROD_DATABASE_URL"
+Set `DATABASE_URL` in the current shell session or through your deployment provider's environment-variable UI.
 
-   Example (Neon-style URL):
-   set "DATABASE_URL=postgresql://user:password@host/neondb?sslmode=require&channel_binding=require"
+Run:
 
-   Notes:
-   - Do NOT wrap the URL in single quotes in CMD.
-   - This does NOT modify your .env file.
-   - This value disappears when you close the CMD window.
+```bash
+npm run db:push
+```
 
-4) Verify (optional but recommended)
+Confirm that the command exits successfully, then verify the expected tables, columns, and indexes in your database provider dashboard.
 
-   echo %DATABASE_URL%
+## Cleanup
 
-   Confirm it prints your production URL.
+If you exported a production `DATABASE_URL` locally for a single terminal session, unset it when finished:
 
-5) Install dependencies (if needed)
+```bash
+unset DATABASE_URL
+```
 
-   npm install
+On Windows Command Prompt:
 
-   You can skip this if you already have a working node_modules and you haven’t changed deps.
-
-6) Run the schema push
-
-   npm run db:push
-
-7) Confirm success
-   - The command should exit without errors.
-   - Optionally check your DB tables/columns in Neon’s dashboard.
-   - Optionally run your backend and hit an endpoint that relies on the new schema.
-
-Cleanup (optional)
-------------------
-Unset the env var in the same CMD window:
-
+```cmd
 set "DATABASE_URL="
-
-Or just close the CMD window.
-
-One-liner version (optional)
-----------------------------
-If you want to do it in one command:
-
-set "DATABASE_URL=YOUR_PROD_DATABASE_URL" && npm install && npm run db:push
-
-Troubleshooting
----------------
-- If db:push connects to the wrong DB:
-  - Re-check echo %DATABASE_URL%
-  - Ensure your drizzle config uses DATABASE_URL
-
-- If npm install / db:push fails with EPERM or locked files:
-  - Close editors/dev servers/watchers using the project.
-  - local folder folders sometimes cause file-lock issues; consider moving the repo to
-    a non-synced folder like C:\dev\TVShowTracker.
+```

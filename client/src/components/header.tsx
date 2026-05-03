@@ -16,6 +16,7 @@ export function Header() {
   const { user, logoutMutation } = useAuth();
   const [location] = useLocation();
   const isMovieMode = location.startsWith('/movies') || location.startsWith('/movie/');
+  const isSharedListView = /^\/[^/]+\/shared-list\/?$/.test(location);
 
   const handleLogout = () => {
     logoutMutation.mutate();
@@ -39,7 +40,7 @@ export function Header() {
           </Link>
 
           <div className="flex items-center gap-4">
-            {user && (
+            {user && !isSharedListView && (
               <div className="flex items-center bg-muted rounded-full p-1">
                 <Link
                   href="/"
@@ -77,12 +78,26 @@ export function Header() {
                     </span>
                   </div>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/" className="w-full">
+                      Your TV & Movies
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings" className="w-full">
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleLogout}>
                     Sign out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : null}
+            ) : (
+              <Button asChild size="sm">
+                <Link href="/auth">Sign In / Sign Up</Link>
+              </Button>
+            )}
           </div>
         </div>
       </div>
