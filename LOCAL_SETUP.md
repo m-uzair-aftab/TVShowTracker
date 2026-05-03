@@ -56,8 +56,8 @@ JWT_SECRET=your_jwt_secret_here
 # Environment
 NODE_ENV=development
 
-# Frontend API URL (optional - defaults to http://localhost:5000)
-VITE_API_BASE_URL=http://localhost:5000
+# Frontend API URL (optional - defaults to http://localhost:5001)
+VITE_API_BASE_URL=http://localhost:5001
 ```
 
 **Important Notes:**
@@ -65,7 +65,7 @@ VITE_API_BASE_URL=http://localhost:5000
 - **SESSION_SECRET**: Use a strong random string (different from production for security)
 - **JWT_SECRET**: Use a strong random string (can be the same as SESSION_SECRET if you want)
 - **NODE_ENV**: Set to `development` for local development
-- **VITE_API_BASE_URL**: Only needed if you want to override the default `http://localhost:5000`
+- **VITE_API_BASE_URL**: Only needed if you want to override the default `http://localhost:5001`
 
 ### 5. Run Database Migrations
 
@@ -91,17 +91,17 @@ npm run dev
 ```
 
 This command will:
-- Start the Express backend server on port 5000
+- Start the Express backend server on port 5001
 - Start the Vite development server for the React frontend
 - Enable hot module replacement (HMR) for fast development
-- Serve both the API and the frontend from the same port (5000)
+- Serve both the API and the frontend from the same port (5001)
 
 ### 7. Access the Application
 
 Once the server is running, open your browser and navigate to:
 
 ```
-http://localhost:5000
+http://localhost:5001
 ```
 
 The application should now be running locally and connected to your local/test database.
@@ -118,16 +118,16 @@ The application should now be running locally and connected to your local/test d
 
 ### Port Already in Use
 
-If port 5000 is already in use, you can set a different port:
+If port 5001 is already in use, you can set a different port:
 
 ```env
-PORT=5001
+PORT=5002
 ```
 
 And update `VITE_API_BASE_URL` accordingly:
 
 ```env
-VITE_API_BASE_URL=http://localhost:5001
+VITE_API_BASE_URL=http://localhost:5002
 ```
 
 ### Database Connection Issues
@@ -139,7 +139,7 @@ VITE_API_BASE_URL=http://localhost:5001
 
 ### CORS Issues
 
-If you encounter CORS errors, check that `http://localhost:5000` (or your custom port) is in the `allowedOrigins` array in `server/index.ts`.
+If you encounter CORS errors, check that `http://localhost:5001` (or your custom port) is in the `allowedOrigins` array in `server/index.ts`.
 
 ### Missing Environment Variables
 
@@ -148,7 +148,7 @@ If you see errors about missing environment variables, ensure your `.env` file i
 ## Development Notes
 
 - The development server uses Vite's middleware mode, which provides hot module replacement
-- Both frontend and backend are served from the same port (5000) in development
+- Both frontend and backend are served from the same port (5001) in development
 - Session storage uses PostgreSQL via `connect-pg-simple`
 - The app supports both JWT tokens and session cookies for authentication
 
@@ -171,7 +171,7 @@ Once everything is set up, to run locally you just need:
 
 2. **Open in browser:**
    ```
-   http://localhost:5000
+   http://localhost:5001
    ```
 
 That's it! Your local environment is ready for development.

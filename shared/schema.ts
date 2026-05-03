@@ -6,10 +6,15 @@ import { relations } from "drizzle-orm";
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   email: text("email").notNull().unique(),
+  username: text("username"),
   password: text("password").notNull(),
   firstName: text("first_name"),
   lastName: text("last_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    usernameUnique: uniqueIndex("users_username_unique").on(table.username),
+  };
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -151,6 +156,27 @@ export const movieActivityRelations = relations(movieActivity, ({ one }) => ({
   }),
 }));
 
+export const userShareSettings = pgTable("user_share_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  enabled: boolean("enabled").default(false).notNull(),
+  includeAllYears: boolean("include_all_years").default(true).notNull(),
+  sharedYears: json("shared_years").$type<string[]>().default([]).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    userShareSettingsUserUnique: uniqueIndex("user_share_settings_user_id_unique").on(table.userId),
+  };
+});
+
+export const userShareSettingsRelations = relations(userShareSettings, ({ one }) => ({
+  user: one(users, {
+    fields: [userShareSettings.userId],
+    references: [users.id],
+  }),
+}));
+
 export const sessions = pgTable("session", {
   sid: varchar("sid").primaryKey(),
   sess: json("sess").notNull(),
@@ -186,6 +212,12 @@ export const insertUserMovieListSchema = createInsertSchema(userMovieLists).omit
 
 export const insertMovieActivitySchema = createInsertSchema(movieActivity).omit({
   id: true,
+});
+
+export const insertUserShareSettingsSchema = createInsertSchema(userShareSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 // Extended schema for validation
@@ -230,3 +262,6 @@ export type UserMovieList = typeof userMovieLists.$inferSelect;
 
 export type InsertMovieActivity = z.infer<typeof insertMovieActivitySchema>;
 export type MovieActivity = typeof movieActivity.$inferSelect;
+
+export type InsertUserShareSettings = z.infer<typeof insertUserShareSettingsSchema>;
+export type UserShareSettings = typeof userShareSettings.$inferSelect;

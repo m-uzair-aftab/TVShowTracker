@@ -15,12 +15,288 @@ import { z } from "zod";
 import { searchShows, getShowDetails } from "./tvmaze-api";
 import { searchMovies, getMovieDetails } from "./tmdb-api";
 
+const reservedUsernames = new Set([
+  "auth",
+  "api",
+  "movies",
+  "movie",
+  "show",
+  "search",
+  "settings",
+  "share",
+  "health",
+]);
+
+const usernameSchema = z.string()
+  .trim()
+  .toLowerCase()
+  .min(3, "Username must be at least 3 characters")
+  .max(32, "Username must be 32 characters or less")
+  .regex(/^[a-z0-9-]+$/, "Username can only use lowercase letters, numbers, and hyphens")
+  .refine((value) => !value.startsWith("-") && !value.endsWith("-"), {
+    message: "Username cannot start or end with a hyphen",
+  })
+  .refine((value) => !reservedUsernames.has(value), {
+    message: "That username is reserved",
+  });
+
+const shareSettingsUpdateSchema = z.object({
+  username: z.string().trim().optional(),
+  enabled: z.boolean().optional(),
+  includeAllYears: z.boolean().optional(),
+  sharedYears: z.array(z.string().regex(/^\d{4}$/)).optional(),
+});
+
+type SeasonProgressData = {
+  seasonNumber: number;
+  startDate?: string | Date | null;
+  finishDate?: string | Date | null;
+  rating?: number | null;
+};
+
+function getYear(value?: string | Date | null) {
+  if (!value) return null;
+  if (value instanceof Date) return value.getFullYear().toString();
+  return value.slice(0, 4);
+}
+
+function seasonMatchesYears(season: SeasonProgressData, years: Set<string>) {
+  const startYear = getYear(season.startDate);
+  const finishYear = getYear(season.finishDate);
+  return (startYear !== null && years.has(startYear)) || (finishYear !== null && years.has(finishYear));
+}
+
+function getWatchedSeasonsList(seasons: SeasonProgressData[]) {
+  const watched = seasons
+    .filter((season) => season.startDate || season.finishDate)
+    .sort((a, b) => a.seasonNumber - b.seasonNumber)
+    .map((season) => `S${season.seasonNumber}`);
+
+  return watched.length > 0 ? watched.join(", ") : "None";
+}
+
+function calculateAverageRating(seasons: SeasonProgressData[]) {
+  const ratings = seasons
+    .map((season) => season.rating)
+    .filter((rating): rating is number => rating != null);
+
+  if (ratings.length === 0) return null;
+  const sum = ratings.reduce((total, rating) => total + rating, 0);
+  return Math.round(sum / ratings.length);
+}
+
+function calculateGrade(rating: number | null) {
+  if (rating === null || rating === 0) return null;
+  if (rating > 90) return "A+";
+  if (rating >= 85) return "A";
+  if (rating >= 75) return "A-";
+  if (rating >= 65) return "B+";
+  if (rating >= 55) return "B";
+  if (rating >= 45) return "B-";
+  if (rating >= 40) return "C";
+  if (rating >= 30) return "C-";
+  if (rating >= 10) return "D";
+  return "E";
+}
+
+function compareNullableRatings(a: number | null, b: number | null) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
   setupAuth(app);
   
   // Initialize sample data
   await initializeSampleData();
+
+  app.get("/api/share-settings", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const user = await storage.getUser(userId);
+      const settings = await storage.getUserShareSettings(userId);
+      const availableYears = await storage.getUserActivityYears(userId);
+
+      res.json({
+        username: user?.username ?? "",
+        enabled: settings?.enabled ?? false,
+        includeAllYears: settings?.includeAllYears ?? true,
+        sharedYears: settings?.sharedYears ?? [],
+        availableYears,
+        publicPath: user?.username ? `/${user.username}/shared-list` : null,
+      });
+    } catch (error) {
+      console.error("Error getting share settings:", error);
+      res.status(500).json({ message: "Failed to retrieve share settings" });
+    }
+  });
+
+  app.patch("/api/share-settings", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser) {
+        return res.status(401).json({ message: "User not found" });
+      }
+
+      const parsed = shareSettingsUpdateSchema.parse(req.body);
+      const availableYears = await storage.getUserActivityYears(userId);
+      const availableYearSet = new Set(availableYears);
+
+      let nextUsername = currentUser.username ?? "";
+      if (parsed.username !== undefined) {
+        nextUsername = parsed.username.trim().toLowerCase();
+        if (nextUsername) {
+          nextUsername = usernameSchema.parse(nextUsername);
+          const existingUser = await storage.getUserByUsername(nextUsername);
+          if (existingUser && existingUser.id !== userId) {
+            return res.status(409).json({ message: "That username is already taken" });
+          }
+        }
+      }
+
+      const currentSettings = await storage.getOrCreateUserShareSettings(userId);
+      const nextEnabled = parsed.enabled ?? currentSettings.enabled;
+      const nextIncludeAllYears = parsed.includeAllYears ?? currentSettings.includeAllYears;
+      const nextSharedYears = parsed.sharedYears !== undefined
+        ? Array.from(new Set(parsed.sharedYears)).filter((year) => availableYearSet.has(year)).sort((a, b) => Number(b) - Number(a))
+        : currentSettings.sharedYears;
+
+      if (nextEnabled && !nextUsername) {
+        return res.status(400).json({ message: "Choose a username before turning sharing on" });
+      }
+
+      if (nextEnabled && !nextIncludeAllYears && nextSharedYears.length === 0) {
+        return res.status(400).json({ message: "Choose at least one year or share all years" });
+      }
+
+      if (parsed.username !== undefined && nextUsername !== currentUser.username) {
+        await storage.updateUserUsername(userId, nextUsername || null);
+      }
+
+      const updatedSettings = await storage.updateUserShareSettings(userId, {
+        enabled: nextEnabled,
+        includeAllYears: nextIncludeAllYears,
+        sharedYears: nextSharedYears,
+      });
+
+      res.json({
+        username: nextUsername,
+        enabled: updatedSettings.enabled,
+        includeAllYears: updatedSettings.includeAllYears,
+        sharedYears: updatedSettings.sharedYears,
+        availableYears,
+        publicPath: nextUsername ? `/${nextUsername}/shared-list` : null,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+
+      console.error("Error updating share settings:", error);
+      res.status(500).json({ message: "Failed to update share settings" });
+    }
+  });
+
+  app.get("/api/shared-list/:username", async (req, res) => {
+    try {
+      const username = usernameSchema.parse(req.params.username);
+      const user = await storage.getUserByUsername(username);
+
+      if (!user) {
+        return res.status(404).json({ message: "Shared list not found" });
+      }
+
+      const settings = await storage.getUserShareSettings(user.id);
+      if (!settings?.enabled) {
+        return res.status(404).json({ message: "Shared list not found" });
+      }
+
+      const availableYears = await storage.getUserActivityYears(user.id);
+      const requestedYear = typeof req.query.year === "string" && /^\d{4}$/.test(req.query.year)
+        ? req.query.year
+        : null;
+      const activeYear = settings.includeAllYears && requestedYear && availableYears.includes(requestedYear)
+        ? requestedYear
+        : null;
+      const selectedYears = new Set(activeYear ? [activeYear] : settings.sharedYears);
+      const shouldFilterByYear = Boolean(activeYear) || !settings.includeAllYears;
+      const tvShows = await storage.getUserWatchlistWithActivity(user.id);
+      const movies = await storage.getUserMovieListWithActivity(user.id);
+
+      const sharedShows = tvShows
+        .map((item) => {
+          const visibleSeasons = shouldFilterByYear
+            ? item.seasons.filter((season) => seasonMatchesYears(season, selectedYears))
+            : item.seasons;
+
+          if (shouldFilterByYear && visibleSeasons.length === 0) {
+            return null;
+          }
+
+          const averageRating = calculateAverageRating(
+            visibleSeasons.filter((season) => season.startDate || season.finishDate)
+          );
+
+          return {
+            id: item.show.id,
+            title: item.show.title,
+            yearStart: item.show.year_start,
+            yearEnd: item.show.year_end,
+            genre: item.show.genre,
+            posterUrl: item.show.poster_url,
+            description: item.show.description,
+            watched: getWatchedSeasonsList(visibleSeasons),
+            averageRating,
+            grade: calculateGrade(averageRating),
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .sort((a, b) => compareNullableRatings(a.averageRating, b.averageRating) || a.title.localeCompare(b.title));
+
+      const sharedMovies = movies
+        .filter((item) => {
+          if (!shouldFilterByYear) return true;
+          const watchedYear = item.activity?.dateWatched?.slice(0, 4);
+          return watchedYear ? selectedYears.has(watchedYear) : false;
+        })
+        .map((item) => ({
+          id: item.movie.id,
+          title: item.movie.title,
+          releaseYear: item.movie.release_year,
+          genre: item.movie.genre,
+          posterUrl: item.movie.poster_url,
+          description: item.movie.description,
+          rating: item.activity?.rating ?? null,
+        }))
+        .sort((a, b) => compareNullableRatings(a.rating, b.rating) || a.title.localeCompare(b.title));
+
+      const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "Shared";
+
+      res.json({
+        owner: {
+          username: user.username,
+          displayName,
+        },
+        includeAllYears: settings.includeAllYears,
+        sharedYears: settings.sharedYears,
+        availableYears,
+        selectedYear: activeYear,
+        tvShows: sharedShows,
+        movies: sharedMovies,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(404).json({ message: "Shared list not found" });
+      }
+
+      console.error("Error getting shared list:", error);
+      res.status(500).json({ message: "Failed to retrieve shared list" });
+    }
+  });
   
   // Search TV shows
   app.get("/api/tv-shows/search", async (req, res) => {

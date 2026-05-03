@@ -13,12 +13,17 @@ import ShowDetails from "@/pages/show-details";
 import MoviesHome from "@/pages/movies";
 import MovieDetails from "@/pages/movie-details";
 import AuthPage from "@/pages/auth-page";
+import SettingsPage from "@/pages/settings";
+import SharedListPage from "@/pages/shared-list";
 
 function Router() {
   return (
     <Switch>
       <Route path="/auth">
         <AuthPage />
+      </Route>
+      <Route path="/:username/shared-list">
+        {(params) => <SharedListPage username={params.username} />}
       </Route>
       <Route path="/">
         <ProtectedRoute>
@@ -53,6 +58,11 @@ function Router() {
             <MovieDetails />
           </ProtectedRoute>
         )}
+      </Route>
+      <Route path="/settings">
+        <ProtectedRoute>
+          <SettingsPage />
+        </ProtectedRoute>
       </Route>
       <Route>
         <NotFound />
