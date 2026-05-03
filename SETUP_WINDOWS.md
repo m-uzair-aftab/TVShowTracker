@@ -1,59 +1,37 @@
-# Windows Setup - PowerShell Execution Policy Fix
+# Windows Setup Notes
 
-You're encountering a PowerShell execution policy error. Here are three solutions:
+If PowerShell blocks npm scripts because of execution policy settings, use one of these approaches.
 
-## Solution 1: Use Command Prompt (Easiest - No Admin Required)
+## Use Command Prompt
 
-1. Open **Command Prompt** (cmd.exe) instead of PowerShell
-   - Press `Win + R`, type `cmd`, press Enter
-   - Or search for "Command Prompt" in the Start menu
+Open Command Prompt, navigate to the project root, and run npm commands normally:
 
-2. Navigate to your project directory:
-   ```cmd
-   cd <project-root>
-   ```
+```cmd
+npm install
+npm run dev
+```
 
-3. Run npm commands normally:
-   ```cmd
-   npm install
-   ```
+## Temporarily Bypass PowerShell Policy
 
-## Solution 2: Change PowerShell Execution Policy (Requires Admin)
+In the current PowerShell session:
 
-1. Open PowerShell as Administrator:
-   - Right-click on PowerShell in Start menu
-   - Select "Run as Administrator"
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+```
 
-2. Run this command to allow local scripts:
-   ```powershell
-   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-   ```
+Then run:
 
-3. Close and reopen your regular PowerShell window
+```powershell
+npm install
+npm run dev
+```
 
-4. Navigate to your project and run:
-   ```powershell
-   npm install
-   ```
+## Change Current User Policy
 
-## Solution 3: Bypass Policy for Current Session (Temporary)
+If you are comfortable changing your user-level PowerShell policy:
 
-If you want to stay in PowerShell without changing the policy permanently:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
 
-1. In your current PowerShell window, run:
-   ```powershell
-   Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
-   ```
-
-2. Then run your npm command:
-   ```powershell
-   npm install
-   ```
-
-**Note:** This only works for the current PowerShell session. You'll need to run it again each time you open a new PowerShell window.
-
-## Recommended Approach
-
-For development, I recommend **Solution 1** (using Command Prompt) as it's the simplest and doesn't require any policy changes. Command Prompt works perfectly fine for npm commands.
-
-After running `npm install`, you can continue with the setup steps from `LOCAL_SETUP.md`.
+Restart PowerShell before running npm commands again.

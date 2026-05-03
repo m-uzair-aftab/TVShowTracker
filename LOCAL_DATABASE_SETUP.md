@@ -1,131 +1,43 @@
-# Setting Up a Local/Test Database
+# Local Database Setup
 
-This guide will help you set up a separate database for local development and testing, keeping your production data safe.
+Use a separate development database so local testing never affects production data.
 
-## Option 1: Neon Free Tier (Recommended - Easiest)
+## Option 1: Neon Development Database
 
-Neon offers a free tier that's perfect for local development. It's the same database service you're already using, so setup is seamless.
+1. Create a new Neon project or branch for development.
+2. Copy the development connection string from the Neon dashboard.
+3. Add it to your local `.env` file as `DATABASE_URL`.
+4. Run:
 
-### Steps:
+```bash
+npm run db:push
+```
 
-1. **Create a new Neon account/project:**
-   - Go to https://console.neon.tech
-   - Sign up or log in
-   - Click "Create a project"
-   - Give it a name like "tvshowtracker-local" or "tvshowtracker-dev"
+## Option 2: Local Postgres
 
-2. **Get the connection string:**
-   - In your Neon project dashboard
-   - Go to "Connection Details" or "Connection String"
-   - Copy the connection string (it will look like: `postgresql://user:password@ep-xxxxx.region.aws.neon.tech/dbname?sslmode=require`)
+1. Install PostgreSQL locally.
+2. Create a development database.
+3. Set `DATABASE_URL` in `.env` to your local database connection string.
+4. Run:
 
-3. **Update your `.env` file:**
-   - Replace `DATABASE_URL` with your new Neon connection string
-   - Keep `NODE_ENV=development`
+```bash
+npm run db:push
+```
 
-4. **Run migrations:**
-   ```bash
-   npm run db:push
-   ```
-   This will create all the tables in your new empty database.
+## Option 3: Docker Postgres
 
-5. **Optional - Seed test data:**
-   - You can manually create test users through the app
-   - Or create a simple seed script if needed
+If Docker is available, run a local Postgres container with development-only credentials, then set `DATABASE_URL` in `.env` to that container's connection string.
 
-## Option 2: Local PostgreSQL (More Setup Required)
+After the database is ready, start the app with:
 
-If you prefer running PostgreSQL locally on your machine:
+```bash
+npm run dev
+```
 
-### Prerequisites:
-- Install PostgreSQL on Windows
-- Download from: https://www.postgresql.org/download/windows/
+Create a test account through the app's sign-up flow.
 
-### Steps:
+## Safety Notes
 
-1. **Install PostgreSQL:**
-   - Run the installer
-   - Remember the password you set for the `postgres` user
-   - Note the port (default is 5432)
-
-2. **Create a database:**
-   - Open pgAdmin (comes with PostgreSQL) or use command line:
-   ```sql
-   CREATE DATABASE tvshowtracker_dev;
-   ```
-
-3. **Update your `.env` file:**
-   ```env
-   DATABASE_URL=postgresql://postgres:your_password@localhost:5432/tvshowtracker_dev
-   ```
-
-4. **Run migrations:**
-   ```bash
-   npm run db:push
-   ```
-
-## Option 3: Docker PostgreSQL (Good for Isolation)
-
-If you have Docker installed:
-
-### Steps:
-
-1. **Run PostgreSQL in Docker:**
-   ```bash
-   docker run --name tvshowtracker-db -e POSTGRES_PASSWORD=dev-password -e POSTGRES_DB=tvshowtracker_dev -p 5432:5432 -d postgres
-   ```
-
-2. **Update your `.env` file:**
-   ```env
-   DATABASE_URL=postgresql://postgres:dev-password@localhost:5432/tvshowtracker_dev
-   ```
-
-3. **Run migrations:**
-   ```bash
-   npm run db:push
-   ```
-
-## Quick Setup (Recommended: Neon Free Tier)
-
-The fastest way to get started:
-
-1. **Create Neon account:** https://console.neon.tech
-2. **Create new project** (separate from production)
-3. **Copy connection string**
-4. **Update `.env` file** with new connection string
-5. **Run:** `npm run db:push`
-
-That's it! You'll have a fresh, empty database for local development.
-
-## After Setting Up Your New Database
-
-Once you've updated your `.env` file with the new `DATABASE_URL`:
-
-1. **Verify the connection:**
-   ```bash
-   npm run db:push
-   ```
-   This should successfully create all tables without any prompts about existing data.
-
-2. **Start your dev server:**
-   ```bash
-   npm run dev
-   ```
-
-3. **Create a test account:**
-   - Use the app's registration/signup feature
-   - This will create your first user in the new database
-
-## Benefits of Using a Separate Database
-
-✅ **Safe testing** - No risk of affecting production data  
-✅ **Fresh start** - Clean database for each feature you're testing  
-✅ **Easy reset** - Can drop and recreate tables without worry  
-✅ **Multiple developers** - Each can have their own database  
-✅ **Experimentation** - Try schema changes without fear
-
-## Switching Back to Production (If Needed)
-
-If you ever need to switch back to production database:
-- Just update `DATABASE_URL` in `.env` to the production connection string
-- Make sure `NODE_ENV=production` (or keep it as development if you're just testing)
+- Keep development and production database URLs separate.
+- Do not commit `.env` files or real connection strings.
+- Use provider snapshots or branches before testing destructive schema changes against important data.

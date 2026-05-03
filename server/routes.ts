@@ -110,8 +110,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
   setupAuth(app);
   
-  // Initialize sample data
-  await initializeSampleData();
+  if (process.env.SEED_DEMO_DATA === "true") {
+    await initializeSampleData();
+  }
 
   app.get("/api/share-settings", authHybrid, async (req, res) => {
     try {
@@ -798,15 +799,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 // Initialize sample data for the application
 async function initializeSampleData() {
-  // A demo user has already been created in our database migration
-  // This will be email: user@example.com with password: demo-password
-  // The migration created the user with bcrypt hashed password
   let demoUser;
   try {
     demoUser = await storage.getUserByEmail("user@example.com");
     if (!demoUser) {
       console.log("Demo user not found, creating one...");
-      const hashedPassword = await bcrypt.hash("demo-password", 10);
+      const demoPassword = process.env.DEMO_USER_PASSWORD;
+      if (!demoPassword) {
+        throw new Error("DEMO_USER_PASSWORD must be set when SEED_DEMO_DATA=true");
+      }
+      const hashedPassword = await bcrypt.hash(demoPassword, 10);
       demoUser = await storage.createUser({ 
         email: "user@example.com", 
         password: hashedPassword,
