@@ -157,10 +157,16 @@ export function MyTVShows({ onSwitchToSearch }: MyTVShowsProps) {
   }
 
   // Helper function to format date
+  const parseCalendarDate = (dateString: string | null | undefined) => {
+    if (!dateString) return null;
+    const [calendarDate] = dateString.split('T');
+    const date = new Date(calendarDate + 'T00:00:00');
+    return isNaN(date.getTime()) ? null : date;
+  };
+
   const formatDate = (dateString: string | null | undefined) => {
-    if (!dateString) return 'Not set';
-    const date = new Date(dateString + 'T00:00:00');
-    if (isNaN(date.getTime())) return 'Not set';
+    const date = parseCalendarDate(dateString);
+    if (!date) return 'Not set';
     return format(date, 'MMM d, yyyy');
   };
 
@@ -337,10 +343,10 @@ export function MyTVShows({ onSwitchToSearch }: MyTVShowsProps) {
           comparison = ratingA - ratingB;
           break;
         case 'activity':
-          // Sort by last activity date (most recent first)
-          const dateA = a.lastActivity ? new Date(a.lastActivity).getTime() : 0;
-          const dateB = b.lastActivity ? new Date(b.lastActivity).getTime() : 0;
-          comparison = dateB - dateA; // Newer dates should be first by default
+          // Base comparison is oldest first; direction flips it for descending.
+          const dateA = parseCalendarDate(a.lastActivity)?.getTime() || 0;
+          const dateB = parseCalendarDate(b.lastActivity)?.getTime() || 0;
+          comparison = dateA - dateB;
           break;
         default:
           comparison = a.show.title.localeCompare(b.show.title);

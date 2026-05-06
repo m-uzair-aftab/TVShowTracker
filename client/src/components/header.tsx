@@ -16,6 +16,7 @@ export function Header() {
   const { user, logoutMutation } = useAuth();
   const [location] = useLocation();
   const isMovieMode = location.startsWith('/movies') || location.startsWith('/movie/');
+  const isAuthView = /^\/auth\/?$/.test(location);
   const isSharedListView = /^\/[^/]+\/shared-list\/?$/.test(location);
 
   const handleLogout = () => {
@@ -93,11 +94,11 @@ export function Header() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : (
+            ) : !isAuthView ? (
               <Button asChild size="sm">
                 <Link href="/auth">Sign In / Sign Up</Link>
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
