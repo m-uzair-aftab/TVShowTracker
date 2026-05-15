@@ -2,18 +2,9 @@
 import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import session from 'express-session';
-import connectPgSimple from 'connect-pg-simple';
 
 import { registerRoutes } from './routes';
 import { setupVite, serveStatic, log } from './vite';
-
-// Set a default session secret for development
-if (!process.env.SESSION_SECRET) {
-  process.env.SESSION_SECRET = "tv-tracker-dev-secret-key";
-}
-
-
 
 const app = express();
 // JSON body parsing
@@ -29,26 +20,9 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
-const PgSession = connectPgSimple(session);
 
 // Needed when running behind Render's proxy to use secure cookies
 app.set('trust proxy', 1);
-
-app.use(session({
-  store: new PgSession({
-    conString: process.env.DATABASE_URL!,   // your Neon connection string from .env
-    createTableIfMissing: true
-  }),
-  secret: process.env.SESSION_SECRET!,      // from .env (or the dev fallback above)
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'none',
-    secure: process.env.NODE_ENV === 'production', // true on Render
-    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
-  }
-}));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

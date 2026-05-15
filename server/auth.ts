@@ -1,15 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
-import session from 'express-session';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { storage } from './storage';
-
-// Extend the Express session with our own types
-declare module 'express-session' {
-  interface SessionData {
-    userId?: number;
-  }
-}
 
 // Extend Express Request to include userId from JWT
 declare global {
@@ -42,43 +34,27 @@ export function verifyToken(token: string): { userId: number } | null {
   }
 }
 
-// Hybrid auth middleware that accepts both JWT tokens and sessions
-export function authHybrid(req: Request, res: Response, next: NextFunction) {
-  // 1) Try JWT token from Authorization header
+function getUserIdFromRequest(req: Request): number | undefined {
   const auth = req.headers.authorization || '';
-  const m = auth.match(/^Bearer (.+)$/i);
-  if (m) {
-    const payload = verifyToken(m[1]);
-    if (payload) {
-      req.userId = payload.userId;
-      return next();
-    }
-  }
-  
-  // 2) Fallback to session (existing path)
-  if (req.session.userId) {
-    req.userId = req.session.userId;
+  const match = auth.match(/^Bearer (.+)$/i);
+  if (!match) return undefined;
+
+  const payload = verifyToken(match[1]);
+  return payload?.userId;
+}
+
+// JWT auth middleware
+export function authHybrid(req: Request, res: Response, next: NextFunction) {
+  const userId = getUserIdFromRequest(req);
+  if (userId) {
+    req.userId = userId;
     return next();
   }
-  
+
   return res.status(401).json({ message: 'Authentication required' });
 }
 
 export function setupAuth(app: express.Express) {
-  // Setup session middleware
-  app.use(
-    session({
-      secret: getAuthSecret(),
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        // Set secure to false to make it work on Replit
-        secure: false, 
-        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
-      }
-    })
-  );
-
   // Registration endpoint
   app.post('/api/auth/register', async (req: Request, res: Response) => {
     try {
@@ -105,9 +81,6 @@ export function setupAuth(app: express.Express) {
         firstName: firstName || null,
         lastName: lastName || null
       });
-
-      // Set session (for backward compatibility)
-      req.session.userId = user.id;
       
       // Generate JWT token
       const token = signToken(user.id);
@@ -142,9 +115,6 @@ export function setupAuth(app: express.Express) {
       if (!passwordMatch) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
-
-      // Set session (for backward compatibility)
-      req.session.userId = user.id;
       
       // Generate JWT token
       const token = signToken(user.id);
@@ -159,37 +129,14 @@ export function setupAuth(app: express.Express) {
   });
 
   // Logout endpoint
-  app.post('/api/auth/logout', (req: Request, res: Response) => {
-    req.session.destroy((err) => {
-      if (err) {
-        console.error('Logout error:', err);
-        return res.status(500).json({ message: 'Failed to logout' });
-      }
-      res.clearCookie('connect.sid');
-      res.status(200).json({ message: 'Logged out successfully' });
-    });
+  app.post('/api/auth/logout', (_req: Request, res: Response) => {
+    res.status(200).json({ message: 'Logged out successfully' });
   });
 
   // Get current user endpoint
   app.get('/api/auth/me', async (req: Request, res: Response) => {
     try {
-      // Use authHybrid middleware logic here
-      let userId: number | undefined;
-      
-      // 1) Try JWT token from Authorization header
-      const auth = req.headers.authorization || '';
-      const m = auth.match(/^Bearer (.+)$/i);
-      if (m) {
-        const payload = verifyToken(m[1]);
-        if (payload) {
-          userId = payload.userId;
-        }
-      }
-      
-      // 2) Fallback to session
-      if (!userId && req.session.userId) {
-        userId = req.session.userId;
-      }
+      const userId = getUserIdFromRequest(req);
       
       if (!userId) {
         return res.status(401).json({ message: 'Not authenticated' });
@@ -197,10 +144,6 @@ export function setupAuth(app: express.Express) {
 
       const user = await storage.getUser(userId);
       if (!user) {
-        // Clear session if user not found
-        if (req.session.userId) {
-          req.session.destroy(() => {});
-        }
         return res.status(401).json({ message: 'User not found' });
       }
 
@@ -216,8 +159,11 @@ export function setupAuth(app: express.Express) {
 
 // Middleware to check if the user is authenticated
 export function isAuthenticated(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId) {
+  const userId = getUserIdFromRequest(req);
+  if (!userId) {
     return res.status(401).json({ message: 'Authentication required' });
   }
+
+  req.userId = userId;
   next();
 }
