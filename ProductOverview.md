@@ -8,6 +8,8 @@ TVShowTracker helps users keep a personal record of TV shows and movies, includi
 - TV show search and detail pages powered by TVmaze.
 - Movie search and detail pages powered by TMDB.
 - Personal TV list with season progress, watched seasons, average rating, grade, and year filtering.
+- AI Insights tab for a stored TV Taste Profile generated from watched seasons, ratings, genres, and activity.
+- AI generation failures show friendly retry copy in the UI while detailed provider diagnostics remain in backend logs.
 - Personal movie list with watched date, rating, watched platform, sorting, year filtering, and CSV export.
 - Settings page for enabling a public shared list.
 - Read-only public shared-list pages at `/:username/shared-list`.
@@ -36,6 +38,7 @@ Client routes:
 - `/auth`
 - `/`
 - `/search`
+- `/ai-insights`
 - `/movies`
 - `/movies/search`
 - `/settings`
@@ -47,6 +50,8 @@ API routes:
 - `POST /api/auth/register`
 - `GET /api/auth/me`
 - `GET /api/watchlist/myshows`
+- `GET /api/ai-insights/tv/taste-profile`
+- `POST /api/ai-insights/tv/taste-profile/regenerate`
 - `GET /api/movies/list/mylist`
 - `GET /api/share-settings`
 - `PATCH /api/share-settings`

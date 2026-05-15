@@ -177,6 +177,61 @@ export const userShareSettingsRelations = relations(userShareSettings, ({ one })
   }),
 }));
 
+export const aiMediaTypes = ["tv", "movie"] as const;
+export const aiInsightTypes = ["taste_profile"] as const;
+
+export type AiMediaType = typeof aiMediaTypes[number];
+export type AiInsightType = typeof aiInsightTypes[number];
+
+export type AiTasteProfile = {
+  tasteSummary: string;
+  topGenres: string[];
+  favoritePatterns: string[];
+  recentTrends?: string[];
+  discoveryLanes: string[];
+};
+
+export type AiInsightSourceSummary = {
+  showCount?: number;
+  watchedSeasonCount?: number;
+  ratedSeasonCount?: number;
+  averageRating?: number | null;
+  genreCount?: number;
+  dateRange?: {
+    start?: string | null;
+    end?: string | null;
+  };
+};
+
+export const userAiInsights = pgTable("user_ai_insights", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  mediaType: text("media_type").$type<AiMediaType>().notNull(),
+  insightType: text("insight_type").$type<AiInsightType>().notNull(),
+  profile: json("profile").$type<AiTasteProfile>().notNull(),
+  sourceSummary: json("source_summary").$type<AiInsightSourceSummary>().notNull(),
+  model: text("model").notNull(),
+  promptVersion: text("prompt_version").notNull(),
+  generatedAt: timestamp("generated_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    userAiInsightUnique: uniqueIndex("user_ai_insights_user_media_type_unique").on(
+      table.userId,
+      table.mediaType,
+      table.insightType
+    ),
+  };
+});
+
+export const userAiInsightsRelations = relations(userAiInsights, ({ one }) => ({
+  user: one(users, {
+    fields: [userAiInsights.userId],
+    references: [users.id],
+  }),
+}));
+
 export const sessions = pgTable("session", {
   sid: varchar("sid").primaryKey(),
   sess: json("sess").notNull(),
@@ -215,6 +270,12 @@ export const insertMovieActivitySchema = createInsertSchema(movieActivity).omit(
 });
 
 export const insertUserShareSettingsSchema = createInsertSchema(userShareSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertUserAiInsightSchema = createInsertSchema(userAiInsights).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -265,3 +326,6 @@ export type MovieActivity = typeof movieActivity.$inferSelect;
 
 export type InsertUserShareSettings = z.infer<typeof insertUserShareSettingsSchema>;
 export type UserShareSettings = typeof userShareSettings.$inferSelect;
+
+export type InsertUserAiInsight = z.infer<typeof insertUserAiInsightSchema>;
+export type UserAiInsight = typeof userAiInsights.$inferSelect;

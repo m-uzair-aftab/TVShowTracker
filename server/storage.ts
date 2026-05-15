@@ -6,7 +6,9 @@ import {
   seasonProgress, type SeasonProgress, type InsertSeasonProgress,
   userMovieLists, type UserMovieList, type InsertUserMovieList,
   movieActivity, type MovieActivity, type InsertMovieActivity,
-  userShareSettings, type UserShareSettings
+  userShareSettings, type UserShareSettings,
+  userAiInsights, type UserAiInsight, type AiMediaType, type AiInsightType,
+  type AiTasteProfile, type AiInsightSourceSummary
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, ilike, and, sql } from "drizzle-orm";
@@ -61,6 +63,19 @@ export interface IStorage {
   getOrCreateUserShareSettings(userId: number): Promise<UserShareSettings>;
   updateUserShareSettings(userId: number, settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears">>): Promise<UserShareSettings>;
   getUserActivityYears(userId: number): Promise<string[]>;
+
+  // AI insight methods
+  getUserAiInsight(userId: number, mediaType: AiMediaType, insightType: AiInsightType): Promise<UserAiInsight | undefined>;
+  upsertUserAiInsight(input: {
+    userId: number;
+    mediaType: AiMediaType;
+    insightType: AiInsightType;
+    profile: AiTasteProfile;
+    sourceSummary: AiInsightSourceSummary;
+    model: string;
+    promptVersion: string;
+    generatedAt: Date;
+  }): Promise<UserAiInsight>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -565,6 +580,56 @@ export class DatabaseStorage implements IStorage {
     }
 
     return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }
+
+  async getUserAiInsight(
+    userId: number,
+    mediaType: AiMediaType,
+    insightType: AiInsightType
+  ): Promise<UserAiInsight | undefined> {
+    const result = await db.select()
+      .from(userAiInsights)
+      .where(
+        and(
+          eq(userAiInsights.userId, userId),
+          eq(userAiInsights.mediaType, mediaType),
+          eq(userAiInsights.insightType, insightType)
+        )
+      );
+
+    return result[0];
+  }
+
+  async upsertUserAiInsight(input: {
+    userId: number;
+    mediaType: AiMediaType;
+    insightType: AiInsightType;
+    profile: AiTasteProfile;
+    sourceSummary: AiInsightSourceSummary;
+    model: string;
+    promptVersion: string;
+    generatedAt: Date;
+  }): Promise<UserAiInsight> {
+    const [insight] = await db.insert(userAiInsights)
+      .values(input)
+      .onConflictDoUpdate({
+        target: [
+          userAiInsights.userId,
+          userAiInsights.mediaType,
+          userAiInsights.insightType,
+        ],
+        set: {
+          profile: input.profile,
+          sourceSummary: input.sourceSummary,
+          model: input.model,
+          promptVersion: input.promptVersion,
+          generatedAt: input.generatedAt,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    return insight;
   }
 }
 

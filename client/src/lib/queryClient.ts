@@ -2,11 +2,55 @@ import { QueryClient, QueryFunction, QueryFunctionContext } from '@tanstack/reac
 import { API_BASE_URL } from '@/config'; // or '../config' if you don't use @ alias
 import { getToken } from './token';
 
+type ApiErrorPayload = {
+  message?: unknown;
+  code?: unknown;
+};
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  body: unknown;
+
+  constructor(status: number, message: string, body: unknown, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.body = body;
+  }
+}
+
+async function parseErrorBody(res: Response) {
+  const text = await res.text();
+  if (!text) {
+    return {
+      body: null,
+      message: res.statusText,
+      code: undefined,
+    };
+  }
+
+  try {
+    const body = JSON.parse(text) as ApiErrorPayload;
+    return {
+      body,
+      message: typeof body.message === 'string' ? body.message : text,
+      code: typeof body.code === 'string' ? body.code : undefined,
+    };
+  } catch {
+    return {
+      body: text,
+      message: text,
+      code: undefined,
+    };
+  }
+}
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    const parsed = await parseErrorBody(res);
+    throw new ApiError(res.status, parsed.message || res.statusText, parsed.body, parsed.code);
   }
 }
 
@@ -65,7 +109,8 @@ export function getQueryFn(opts?: { on401?: 'returnNull' | 'throw' }): QueryFunc
       if (res.status === 401 && opts?.on401 === 'returnNull') {
         return undefined;
       }
-      throw new Error((await res.text()) || res.statusText);
+      const parsed = await parseErrorBody(res);
+      throw new ApiError(res.status, parsed.message || res.statusText, parsed.body, parsed.code);
     }
 
     return res.json();

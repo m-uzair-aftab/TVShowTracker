@@ -35,6 +35,11 @@ function Router() {
           <Home />
         </ProtectedRoute>
       </Route>
+      <Route path="/ai-insights">
+        <ProtectedRoute>
+          <Home />
+        </ProtectedRoute>
+      </Route>
       <Route path="/show/:id">
         {(params) => (
           <ProtectedRoute>

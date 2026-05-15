@@ -5,9 +5,9 @@ import { queryClient } from '@/lib/queryClient';
 import { SearchForm } from '@/components/search-form';
 import { ResultsSection } from '@/components/results-section';
 import { MyTVShows } from '@/components/fixed-my-tv-shows';
+import { AIInsights } from '@/components/ai-insights';
 import { TvShow } from '@shared/schema';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { API_BASE_URL } from '../config';
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,6 +29,8 @@ export default function Home() {
     const tabParam = params?.tab;
     if (tabParam === 'search') {
       setActiveTab('search');
+    } else if (tabParam === 'ai-insights') {
+      setActiveTab('ai-insights');
     } else {
       setActiveTab('myshows');
     }
@@ -67,14 +69,17 @@ const { data: shows, isLoading, error } = useQuery<TvShow[]>({
             // Update URL without refreshing the page when tab changes
             if (value === 'search') {
               window.history.replaceState(null, '', '/search');
+            } else if (value === 'ai-insights') {
+              window.history.replaceState(null, '', '/ai-insights');
             } else {
               window.history.replaceState(null, '', '/');
             }
           }}
         >
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-8">
+          <TabsList className="grid w-full max-w-xl mx-auto grid-cols-3 mb-8">
             <TabsTrigger value="myshows">My TV Shows</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
+            <TabsTrigger value="ai-insights">AI Insights</TabsTrigger>
           </TabsList>
           
           <TabsContent value="search" className="mt-0">
@@ -96,6 +101,10 @@ const { data: shows, isLoading, error } = useQuery<TvShow[]>({
           <TabsContent value="myshows" className="mt-0">
             {/* Pass the setActiveTab function to MyTVShows component */}
             <MyTVShows onSwitchToSearch={() => setActiveTab('search')} />
+          </TabsContent>
+
+          <TabsContent value="ai-insights" className="mt-0">
+            <AIInsights />
           </TabsContent>
         </Tabs>
       </main>

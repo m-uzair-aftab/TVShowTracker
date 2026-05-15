@@ -9,6 +9,7 @@ TVShowTracker is a full-stack application for tracking TV shows and movies.
 - Database: Postgres through Drizzle ORM
 - Hosting: Netlify for the frontend and a Node-capable backend host
 - External data: TVmaze for TV shows and TMDB for movies
+- AI generation: NVIDIA-hosted OpenAI-compatible LLM endpoint for stored insights
 
 ## Frontend
 
@@ -31,6 +32,8 @@ Key responsibilities:
 - Authenticate users with JWT bearer tokens and session fallback support.
 - Store user lists, ratings, progress, and sharing settings.
 - Fetch and normalize TVmaze and TMDB search/detail data.
+- Generate and persist AI insights from authenticated user history.
+- Sanitize AI provider failures before returning them to clients while logging structured server-side diagnostics for the failed stage, provider, model, upstream status, and upstream response body.
 
 ## Database
 
@@ -44,6 +47,7 @@ Important data areas include:
 - Movie metadata
 - User movie lists and movie activity
 - Public share settings
+- Stored AI insights, including media type, insight type, profile JSON, source summary, model, and generation timestamps
 - Session storage
 
 ## Public Shared Lists
@@ -64,6 +68,9 @@ Required production values should be configured through the deployment provider:
 - `SESSION_SECRET`
 - `JWT_SECRET`
 - `TMDB_API_KEY`
+- `NVIDIA_BASE_URL`
+- `NVIDIA_API_KEY`
+- `NVIDIA_MODEL`
 - `NODE_ENV`
 - `VITE_API_BASE_URL`
 

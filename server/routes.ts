@@ -14,6 +14,7 @@ import {
 import { z } from "zod";
 import { searchShows, getShowDetails } from "./tvmaze-api";
 import { searchMovies, getMovieDetails } from "./tmdb-api";
+import { generateTvTasteProfile, isAiGenerationError } from "./ai-insights";
 
 const reservedUsernames = new Set([
   "auth",
@@ -97,6 +98,20 @@ function calculateGrade(rating: number | null) {
   if (rating >= 30) return "C-";
   if (rating >= 10) return "D";
   return "E";
+}
+
+function serializeError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
 }
 
 function compareNullableRatings(a: number | null, b: number | null) {
@@ -296,6 +311,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.error("Error getting shared list:", error);
       res.status(500).json({ message: "Failed to retrieve shared list" });
+    }
+  });
+
+  app.get("/api/ai-insights/tv/taste-profile", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const insight = await storage.getUserAiInsight(userId, "tv", "taste_profile");
+
+      res.json({ insight: insight ?? null });
+    } catch (error) {
+      console.error("Error getting TV taste profile:", error);
+      res.status(500).json({ message: "Failed to retrieve TV taste profile" });
+    }
+  });
+
+  app.post("/api/ai-insights/tv/taste-profile/regenerate", authHybrid, async (req, res) => {
+    const userId = req.userId!;
+    let routeStage: "load_watchlist" | "generate_profile" | "persist_insight" = "load_watchlist";
+
+    try {
+      const watchlist = await storage.getUserWatchlistWithActivity(userId);
+      routeStage = "generate_profile";
+      const generated = await generateTvTasteProfile(watchlist);
+      const generatedAt = new Date();
+      routeStage = "persist_insight";
+      const insight = await storage.upsertUserAiInsight({
+        userId,
+        mediaType: "tv",
+        insightType: "taste_profile",
+        profile: generated.profile,
+        sourceSummary: generated.sourceSummary,
+        model: generated.model,
+        promptVersion: generated.promptVersion,
+        generatedAt,
+      });
+
+      res.json({ insight });
+    } catch (error) {
+      if (isAiGenerationError(error)) {
+        console.error("AI taste profile generation failed", {
+          route: "POST /api/ai-insights/tv/taste-profile/regenerate",
+          userId,
+          routeStage,
+          stage: error.stage,
+          provider: error.provider,
+          model: error.model,
+          upstreamStatus: error.upstreamStatus,
+          upstreamBody: error.upstreamBody,
+          isProviderUnavailable: error.isProviderUnavailable,
+          error: serializeError(error),
+          originalError: error.originalError ? serializeError(error.originalError) : undefined,
+        });
+
+        if (error.isProviderUnavailable) {
+          return res.status(503).json({
+            message: "Unable to temporarily reach LLM provider. Try again later.",
+            code: "LLM_PROVIDER_UNAVAILABLE",
+          });
+        }
+
+        return res.status(500).json({
+          message: "Failed to generate TV taste profile. Please try again later.",
+          code: "AI_GENERATION_FAILED",
+        });
+      }
+
+      console.error("AI taste profile route failed", {
+        route: "POST /api/ai-insights/tv/taste-profile/regenerate",
+        userId,
+        routeStage,
+        error: serializeError(error),
+      });
+
+      res.status(500).json({
+        message: "Failed to generate TV taste profile. Please try again later.",
+        code: "AI_GENERATION_FAILED",
+      });
     }
   });
   
