@@ -10,6 +10,7 @@ TVShowTracker is a full-stack application for tracking TV shows and movies.
 - Hosting: Netlify for the frontend and a Node-capable backend host
 - External data: TVmaze for TV shows and TMDB for movies
 - AI generation: NVIDIA-hosted OpenAI-compatible LLM endpoint for stored insights
+- LLM observability: durable Postgres logs plus an operator-only React dashboard
 
 ## Frontend
 
@@ -32,8 +33,9 @@ Key responsibilities:
 - Authenticate users with JWT bearer tokens and session fallback support.
 - Store user lists, ratings, progress, and sharing settings.
 - Fetch and normalize TVmaze and TMDB search/detail data.
-- Generate and persist AI insights from authenticated user history.
-- Sanitize AI provider failures before returning them to clients while logging structured server-side diagnostics for the failed stage, provider, model, upstream status, and upstream response body.
+- Generate and persist TV and movie AI insights from authenticated user history.
+- Route every LLM provider call through the shared `server/llm-client.ts` observability layer.
+- Sanitize AI provider failures before returning them to clients while storing structured diagnostics for the failed stage, provider, model, upstream status, upstream response body, request payload, output, token usage, and response time.
 
 ## Database
 
@@ -47,8 +49,17 @@ Important data areas include:
 - Movie metadata
 - User movie lists and movie activity
 - Public share settings
-- Stored AI insights, including media type, insight type, profile JSON, source summary, model, and generation timestamps
+- Stored AI insights for TV and movies, including media type, insight type, profile JSON, source summary, model, and generation timestamps
+- LLM call logs, including raw request payloads, outputs, provider responses, provider/model metadata, token usage, latency, errors, and associated user identity
 - Session storage
+
+## LLM Observability
+
+All current and future LLM calls must go through `server/llm-client.ts`. Feature code should not call provider endpoints directly or read provider credentials directly. The `npm run check:llm-guardrail` script fails if app source references known LLM provider endpoints or credentials outside the shared client.
+
+The dashboard is available at `/observability/llm` for authenticated users whose email appears in `OBSERVABILITY_ADMIN_EMAILS`. Backend observability APIs repeat this admin check before returning raw logs or summaries.
+
+Raw LLM logs are stored in Postgres and retained for 90 days. Logs intentionally include full prompts and outputs for debugging, so access is operator-only.
 
 ## Public Shared Lists
 
@@ -71,6 +82,7 @@ Required production values should be configured through the deployment provider:
 - `NVIDIA_BASE_URL`
 - `NVIDIA_API_KEY`
 - `NVIDIA_MODEL`
+- `OBSERVABILITY_ADMIN_EMAILS`
 - `NODE_ENV`
 - `VITE_API_BASE_URL`
 

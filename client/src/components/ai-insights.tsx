@@ -12,10 +12,10 @@ import { ApiError, apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 
 type AiInsightResponse = {
-  insight: TvTasteProfileInsight | null;
+  insight: TasteProfileInsight | null;
 };
 
-type TvTasteProfileInsight = {
+type TasteProfileInsight = {
   id: number;
   profile: unknown;
   sourceSummary: AiInsightSourceSummary;
@@ -25,14 +25,54 @@ type TvTasteProfileInsight = {
   updatedAt: string;
 };
 
-const TV_TASTE_PROFILE_QUERY_KEY = ['/api/ai-insights/tv/taste-profile'];
-const TV_TASTE_PROFILE_PROMPT_VERSION = 'tv-taste-profile-v3';
+type AiInsightsMediaType = 'tv' | 'movie';
+
+type AiInsightsCopy = {
+  queryKey: string[];
+  regeneratePath: string;
+  promptVersion: string;
+  fallbackGenerationError: string;
+  sectionDescription: string;
+  contentTitle: string;
+  cardDescription: string;
+  favoritePatternsDescription: string;
+  emptyDescription: string;
+  savedToastDescription: string;
+};
+
+const AI_INSIGHTS_COPY: Record<AiInsightsMediaType, AiInsightsCopy> = {
+  tv: {
+    queryKey: ['/api/ai-insights/tv/taste-profile'],
+    regeneratePath: '/api/ai-insights/tv/taste-profile/regenerate',
+    promptVersion: 'tv-taste-profile-v3',
+    fallbackGenerationError: 'Failed to generate TV taste profile. Please try again later.',
+    sectionDescription: 'Short, saved insights generated from your personal TV history.',
+    contentTitle: 'Your TV Taste',
+    cardDescription: 'A recommendation-ready read on what your TV history says about you.',
+    favoritePatternsDescription: 'Traits your watched and rated shows suggest you already enjoy.',
+    emptyDescription: 'Generate a short TV taste card from your watched seasons, ratings, genres, and activity.',
+    savedToastDescription: 'Your TV taste profile has been saved.',
+  },
+  movie: {
+    queryKey: ['/api/ai-insights/movie/taste-profile'],
+    regeneratePath: '/api/ai-insights/movie/taste-profile/regenerate',
+    promptVersion: 'movie-taste-profile-v1',
+    fallbackGenerationError: 'Failed to generate movie taste profile. Please try again later.',
+    sectionDescription: 'Short, saved insights generated from your personal movie history.',
+    contentTitle: 'Your Movie Taste',
+    cardDescription: 'A recommendation-ready read on what your movie history says about you.',
+    favoritePatternsDescription: 'Traits your watched and rated movies suggest you already enjoy.',
+    emptyDescription: 'Generate a short movie taste card from your watched movies, ratings, genres, and activity.',
+    savedToastDescription: 'Your movie taste profile has been saved.',
+  },
+};
+
 const MAX_PATTERN_ITEMS = 5;
 const MAX_DISCOVERY_ITEMS = 5;
 const MAX_RECENT_TREND_ITEMS = 4;
 const LLM_PROVIDER_UNAVAILABLE_MESSAGE = 'Unable to temporarily reach LLM provider. Try again later.';
 
-function getProfileGenerationErrorMessage(error: unknown) {
+function getProfileGenerationErrorMessage(error: unknown, fallbackMessage: string) {
   if (error instanceof ApiError && error.code === 'LLM_PROVIDER_UNAVAILABLE') {
     return LLM_PROVIDER_UNAVAILABLE_MESSAGE;
   }
@@ -41,7 +81,7 @@ function getProfileGenerationErrorMessage(error: unknown) {
     return error.message;
   }
 
-  return 'Failed to generate TV taste profile. Please try again later.';
+  return fallbackMessage;
 }
 
 function formatDateTime(value: string) {
@@ -144,7 +184,13 @@ function SectionHeader({
   );
 }
 
-function TasteProfileContent({ profile }: { profile: AiTasteProfile }) {
+function TasteProfileContent({
+  profile,
+  copy,
+}: {
+  profile: AiTasteProfile;
+  copy: AiInsightsCopy;
+}) {
   const favoritePatterns = profile.favoritePatterns.filter(Boolean).slice(0, MAX_PATTERN_ITEMS);
   const discoveryLanes = profile.discoveryLanes.filter(Boolean).slice(0, MAX_DISCOVERY_ITEMS);
   const recentTrends = (profile.recentTrends?.filter(Boolean) ?? []).slice(0, MAX_RECENT_TREND_ITEMS);
@@ -153,7 +199,7 @@ function TasteProfileContent({ profile }: { profile: AiTasteProfile }) {
     <div className="space-y-6">
       <div className="space-y-3">
         <SectionHeader
-          title="Your TV Taste"
+          title={copy.contentTitle}
           description="A quick read on what someone should recommend to you."
           icon={<Sparkles className="h-4 w-4" />}
         />
@@ -177,7 +223,7 @@ function TasteProfileContent({ profile }: { profile: AiTasteProfile }) {
         <div className="space-y-3">
           <SectionHeader
             title="Favorite Patterns"
-            description="Traits your watched and rated shows suggest you already enjoy."
+            description={copy.favoritePatternsDescription}
             icon={<Sparkles className="h-4 w-4" />}
           />
           <div className="grid gap-3">
@@ -248,41 +294,41 @@ function RefreshProfileState({
   );
 }
 
-function EmptyProfileState() {
+function EmptyProfileState({ copy }: { copy: AiInsightsCopy }) {
   return (
     <div className="rounded-lg border border-primary/15 bg-primary/5 py-12 text-center">
       <Sparkles className="mx-auto h-8 w-8 text-primary" />
       <h3 className="mt-4 text-lg font-medium">No taste card yet</h3>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-        Generate a short TV taste card from your watched seasons, ratings, genres, and activity.
+        {copy.emptyDescription}
       </p>
     </div>
   );
 }
 
-function TasteProfileSection() {
+function TasteProfileSection({ copy }: { copy: AiInsightsCopy }) {
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(true);
   const { data, isLoading, error } = useQuery<AiInsightResponse>({
-    queryKey: TV_TASTE_PROFILE_QUERY_KEY,
+    queryKey: copy.queryKey,
   });
 
   const regenerateMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/ai-insights/tv/taste-profile/regenerate');
+      const response = await apiRequest('POST', copy.regeneratePath);
       return response.json() as Promise<AiInsightResponse>;
     },
     onSuccess: (response) => {
-      queryClient.setQueryData(TV_TASTE_PROFILE_QUERY_KEY, response);
+      queryClient.setQueryData(copy.queryKey, response);
       toast({
         title: 'Taste card generated',
-        description: 'Your TV taste profile has been saved.',
+        description: copy.savedToastDescription,
       });
     },
     onError: (mutationError) => {
       toast({
         title: 'Could not generate profile',
-        description: getProfileGenerationErrorMessage(mutationError),
+        description: getProfileGenerationErrorMessage(mutationError, copy.fallbackGenerationError),
         variant: 'destructive',
       });
     },
@@ -294,7 +340,7 @@ function TasteProfileSection() {
 
   const insight = data?.insight ?? null;
   const profile = isTasteProfileV2(insight?.profile) ? insight.profile : null;
-  const isOutdated = Boolean(insight && (insight.promptVersion !== TV_TASTE_PROFILE_PROMPT_VERSION || !profile));
+  const isOutdated = Boolean(insight && (insight.promptVersion !== copy.promptVersion || !profile));
   const actionLabel = profile ? 'Regenerate' : isOutdated ? 'Regenerate profile' : 'Generate taste card';
   const actionIcon = regenerateMutation.isPending
     ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -312,7 +358,7 @@ function TasteProfileSection() {
               Taste profile
             </CardTitle>
             <CardDescription className="mt-2">
-              A recommendation-ready read on what your TV history says about you.
+              {copy.cardDescription}
             </CardDescription>
           </div>
           <div className="flex w-full md:w-auto">
@@ -348,13 +394,13 @@ function TasteProfileSection() {
             )}
 
             {profile ? (
-              <TasteProfileContent profile={profile} />
+              <TasteProfileContent profile={profile} copy={copy} />
             ) : isOutdated ? (
               <RefreshProfileState
                 generatedAt={insight?.generatedAt}
               />
             ) : (
-              <EmptyProfileState />
+              <EmptyProfileState copy={copy} />
             )}
 
             <div className="mt-6 flex justify-end">
@@ -384,16 +430,18 @@ function TasteProfileSection() {
   );
 }
 
-export function AIInsights() {
+export function AIInsights({ mediaType = 'tv' }: { mediaType?: AiInsightsMediaType }) {
+  const copy = AI_INSIGHTS_COPY[mediaType];
+
   return (
     <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold">AI Insights</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Short, saved insights generated from your personal TV history.
+          {copy.sectionDescription}
         </p>
       </div>
-      <TasteProfileSection />
+      <TasteProfileSection copy={copy} />
     </section>
   );
 }

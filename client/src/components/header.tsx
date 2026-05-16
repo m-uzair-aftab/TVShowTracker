@@ -89,6 +89,13 @@ export function Header() {
                       Settings
                     </Link>
                   </DropdownMenuItem>
+                  {user.isObservabilityAdmin && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/observability/llm" className="w-full">
+                        LLM Observability
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={handleLogout}>
                     Sign out
                   </DropdownMenuItem>

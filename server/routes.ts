@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from 'bcrypt';
 import { storage } from "./storage";
-import { setupAuth, authHybrid } from "./auth";
+import { setupAuth, authHybrid, requireObservabilityAdmin } from "./auth";
 import { 
   searchTvShowSchema, 
   insertTvShowSchema, 
@@ -14,7 +14,7 @@ import {
 import { z } from "zod";
 import { searchShows, getShowDetails } from "./tvmaze-api";
 import { searchMovies, getMovieDetails } from "./tmdb-api";
-import { generateTvTasteProfile, isAiGenerationError } from "./ai-insights";
+import { generateMovieTasteProfile, generateTvTasteProfile, isAiGenerationError } from "./ai-insights";
 
 const reservedUsernames = new Set([
   "auth",
@@ -24,6 +24,7 @@ const reservedUsernames = new Set([
   "show",
   "search",
   "settings",
+  "observability",
   "share",
   "health",
 ]);
@@ -47,6 +48,44 @@ const shareSettingsUpdateSchema = z.object({
   includeAllYears: z.boolean().optional(),
   sharedYears: z.array(z.string().regex(/^\d{4}$/)).optional(),
 });
+
+const llmStatusSchema = z.enum(["success", "error"]);
+
+const llmLogQuerySchema = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  model: z.string().trim().min(1).optional(),
+  status: llmStatusSchema.optional(),
+  operation: z.string().trim().min(1).optional(),
+  userId: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const llmSummaryQuerySchema = llmLogQuerySchema.omit({
+  limit: true,
+  offset: true,
+});
+
+function parseLlmLogFilters(query: unknown) {
+  const parsed = llmLogQuerySchema.parse(query);
+
+  return {
+    ...parsed,
+    from: parsed.from ? new Date(parsed.from) : undefined,
+    to: parsed.to ? new Date(parsed.to) : undefined,
+  };
+}
+
+function parseLlmSummaryFilters(query: unknown) {
+  const parsed = llmSummaryQuerySchema.parse(query);
+
+  return {
+    ...parsed,
+    from: parsed.from ? new Date(parsed.from) : undefined,
+    to: parsed.to ? new Date(parsed.to) : undefined,
+  };
+}
 
 type SeasonProgressData = {
   seasonNumber: number;
@@ -314,6 +353,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/observability/llm-calls", authHybrid, requireObservabilityAdmin, async (req, res) => {
+    try {
+      const filters = parseLlmLogFilters(req.query);
+      const result = await storage.getLlmCallLogs(filters);
+
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+
+      console.error("Error getting LLM call logs:", error);
+      res.status(500).json({ message: "Failed to retrieve LLM call logs" });
+    }
+  });
+
+  app.get("/api/observability/llm-summary", authHybrid, requireObservabilityAdmin, async (req, res) => {
+    try {
+      const filters = parseLlmSummaryFilters(req.query);
+      const summary = await storage.getLlmCallSummary(filters);
+
+      res.json(summary);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+
+      console.error("Error getting LLM summary:", error);
+      res.status(500).json({ message: "Failed to retrieve LLM summary" });
+    }
+  });
+
   app.get("/api/ai-insights/tv/taste-profile", authHybrid, async (req, res) => {
     try {
       const userId = req.userId!;
@@ -333,7 +404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const watchlist = await storage.getUserWatchlistWithActivity(userId);
       routeStage = "generate_profile";
-      const generated = await generateTvTasteProfile(watchlist);
+      const generated = await generateTvTasteProfile(userId, watchlist);
       const generatedAt = new Date();
       routeStage = "persist_insight";
       const insight = await storage.upsertUserAiInsight({
@@ -386,6 +457,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(500).json({
         message: "Failed to generate TV taste profile. Please try again later.",
+        code: "AI_GENERATION_FAILED",
+      });
+    }
+  });
+
+  app.get("/api/ai-insights/movie/taste-profile", authHybrid, async (req, res) => {
+    try {
+      const userId = req.userId!;
+      const insight = await storage.getUserAiInsight(userId, "movie", "taste_profile");
+
+      res.json({ insight: insight ?? null });
+    } catch (error) {
+      console.error("Error getting movie taste profile:", error);
+      res.status(500).json({ message: "Failed to retrieve movie taste profile" });
+    }
+  });
+
+  app.post("/api/ai-insights/movie/taste-profile/regenerate", authHybrid, async (req, res) => {
+    const userId = req.userId!;
+    let routeStage: "load_movie_list" | "generate_profile" | "persist_insight" = "load_movie_list";
+
+    try {
+      const movieList = await storage.getUserMovieListWithActivity(userId);
+      routeStage = "generate_profile";
+      const generated = await generateMovieTasteProfile(userId, movieList);
+      const generatedAt = new Date();
+      routeStage = "persist_insight";
+      const insight = await storage.upsertUserAiInsight({
+        userId,
+        mediaType: "movie",
+        insightType: "taste_profile",
+        profile: generated.profile,
+        sourceSummary: generated.sourceSummary,
+        model: generated.model,
+        promptVersion: generated.promptVersion,
+        generatedAt,
+      });
+
+      res.json({ insight });
+    } catch (error) {
+      if (isAiGenerationError(error)) {
+        console.error("AI movie taste profile generation failed", {
+          route: "POST /api/ai-insights/movie/taste-profile/regenerate",
+          userId,
+          routeStage,
+          stage: error.stage,
+          provider: error.provider,
+          model: error.model,
+          upstreamStatus: error.upstreamStatus,
+          upstreamBody: error.upstreamBody,
+          isProviderUnavailable: error.isProviderUnavailable,
+          error: serializeError(error),
+          originalError: error.originalError ? serializeError(error.originalError) : undefined,
+        });
+
+        if (error.isProviderUnavailable) {
+          return res.status(503).json({
+            message: "Unable to temporarily reach LLM provider. Try again later.",
+            code: "LLM_PROVIDER_UNAVAILABLE",
+          });
+        }
+
+        return res.status(500).json({
+          message: "Failed to generate movie taste profile. Please try again later.",
+          code: "AI_GENERATION_FAILED",
+        });
+      }
+
+      console.error("AI movie taste profile route failed", {
+        route: "POST /api/ai-insights/movie/taste-profile/regenerate",
+        userId,
+        routeStage,
+        error: serializeError(error),
+      });
+
+      res.status(500).json({
+        message: "Failed to generate movie taste profile. Please try again later.",
         code: "AI_GENERATION_FAILED",
       });
     }

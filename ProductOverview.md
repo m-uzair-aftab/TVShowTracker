@@ -9,7 +9,9 @@ TVShowTracker helps users keep a personal record of TV shows and movies, includi
 - Movie search and detail pages powered by TMDB.
 - Personal TV list with season progress, watched seasons, average rating, grade, and year filtering.
 - AI Insights tab for a stored TV Taste Profile generated from watched seasons, ratings, genres, and activity.
+- AI Insights tab for a stored Movie Taste Profile generated from watched movies, ratings, genres, and activity.
 - AI generation failures show friendly retry copy in the UI while detailed provider diagnostics remain in backend logs.
+- Operator-only LLM Observability dashboard with raw prompts, outputs, model metadata, token usage, latency, errors, and summary metrics.
 - Personal movie list with watched date, rating, watched platform, sorting, year filtering, and CSV export.
 - Settings page for enabling a public shared list.
 - Read-only public shared-list pages at `/:username/shared-list`.
@@ -41,7 +43,9 @@ Client routes:
 - `/ai-insights`
 - `/movies`
 - `/movies/search`
+- `/movies/ai-insights`
 - `/settings`
+- `/observability/llm`
 - `/:username/shared-list`
 
 API routes:
@@ -52,6 +56,10 @@ API routes:
 - `GET /api/watchlist/myshows`
 - `GET /api/ai-insights/tv/taste-profile`
 - `POST /api/ai-insights/tv/taste-profile/regenerate`
+- `GET /api/ai-insights/movie/taste-profile`
+- `POST /api/ai-insights/movie/taste-profile/regenerate`
+- `GET /api/observability/llm-calls`
+- `GET /api/observability/llm-summary`
 - `GET /api/movies/list/mylist`
 - `GET /api/share-settings`
 - `PATCH /api/share-settings`

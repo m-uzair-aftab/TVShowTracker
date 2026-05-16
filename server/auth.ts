@@ -43,6 +43,30 @@ function getUserIdFromRequest(req: Request): number | undefined {
   return payload?.userId;
 }
 
+function getObservabilityAdminEmails() {
+  return new Set(
+    (process.env.OBSERVABILITY_ADMIN_EMAILS || '')
+      .split(',')
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+export function isObservabilityAdminEmail(email?: string | null) {
+  if (!email) return false;
+  return getObservabilityAdminEmails().has(email.toLowerCase());
+}
+
+function serializeUserForClient(user: Awaited<ReturnType<typeof storage.getUser>>) {
+  if (!user) return null;
+  const { password: _, ...userWithoutPassword } = user;
+
+  return {
+    ...userWithoutPassword,
+    isObservabilityAdmin: isObservabilityAdminEmail(user.email),
+  };
+}
+
 // JWT auth middleware
 export function authHybrid(req: Request, res: Response, next: NextFunction) {
   const userId = getUserIdFromRequest(req);
@@ -52,6 +76,21 @@ export function authHybrid(req: Request, res: Response, next: NextFunction) {
   }
 
   return res.status(401).json({ message: 'Authentication required' });
+}
+
+export async function requireObservabilityAdmin(req: Request, res: Response, next: NextFunction) {
+  const userId = req.userId ?? getUserIdFromRequest(req);
+  if (!userId) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  const user = await storage.getUser(userId);
+  if (!user || !isObservabilityAdminEmail(user.email)) {
+    return res.status(403).json({ message: 'Observability admin access required' });
+  }
+
+  req.userId = userId;
+  next();
 }
 
 export function setupAuth(app: express.Express) {
@@ -85,9 +124,7 @@ export function setupAuth(app: express.Express) {
       // Generate JWT token
       const token = signToken(user.id);
       
-      // Return user data with token (without password)
-      const { password: _, ...userWithoutPassword } = user;
-      res.status(201).json({ token, user: userWithoutPassword });
+      res.status(201).json({ token, user: serializeUserForClient(user) });
     } catch (error) {
       console.error('Registration error:', error);
       res.status(500).json({ message: 'Failed to register user' });
@@ -119,9 +156,7 @@ export function setupAuth(app: express.Express) {
       // Generate JWT token
       const token = signToken(user.id);
       
-      // Return user data with token (without password)
-      const { password: _, ...userWithoutPassword } = user;
-      res.status(200).json({ token, user: userWithoutPassword });
+      res.status(200).json({ token, user: serializeUserForClient(user) });
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ message: 'Failed to login' });
@@ -147,9 +182,7 @@ export function setupAuth(app: express.Express) {
         return res.status(401).json({ message: 'User not found' });
       }
 
-      // Return user data (without password)
-      const { password: _, ...userWithoutPassword } = user;
-      res.status(200).json(userWithoutPassword);
+      res.status(200).json(serializeUserForClient(user));
     } catch (error) {
       console.error('Get current user error:', error);
       res.status(500).json({ message: 'Failed to get current user' });

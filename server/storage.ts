@@ -8,10 +8,54 @@ import {
   movieActivity, type MovieActivity, type InsertMovieActivity,
   userShareSettings, type UserShareSettings,
   userAiInsights, type UserAiInsight, type AiMediaType, type AiInsightType,
+  llmCallLogs, type LlmCallLog, type InsertLlmCallLog, type LlmCallStatus,
   type AiTasteProfile, type AiInsightSourceSummary
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, ilike, and, sql } from "drizzle-orm";
+import { desc, eq, gte, ilike, and, lte, lt, sql, type SQL } from "drizzle-orm";
+
+export type LlmCallLogFilters = {
+  from?: Date;
+  to?: Date;
+  model?: string;
+  status?: LlmCallStatus;
+  operation?: string;
+  userId?: number;
+  limit: number;
+  offset: number;
+};
+
+export type LlmCallLogWithUser = LlmCallLog & {
+  user: {
+    id: number;
+    username: string | null;
+    displayName: string;
+    email: string;
+  } | null;
+};
+
+export type LlmCallSummary = {
+  totalCalls: number;
+  successfulCalls: number;
+  erroredCalls: number;
+  averageResponseTimeMs: number | null;
+  p95ResponseTimeMs: number | null;
+  totalInputTokens: number | null;
+  totalOutputTokens: number | null;
+  totalTokens: number | null;
+  byModel: Array<{
+    model: string;
+    totalCalls: number;
+    erroredCalls: number;
+    averageResponseTimeMs: number | null;
+  }>;
+  recentErrors: Array<{
+    errorStage: string | null;
+    errorMessage: string | null;
+    count: number;
+    lastSeenAt: Date;
+  }>;
+};
 
 // modify the interface with any CRUD methods
 // you might need
@@ -76,9 +120,54 @@ export interface IStorage {
     promptVersion: string;
     generatedAt: Date;
   }): Promise<UserAiInsight>;
+
+  // LLM observability methods
+  createLlmCallLog(input: InsertLlmCallLog): Promise<LlmCallLog>;
+  markLlmCallLogFailed(logId: number, input: {
+    errorStage: string;
+    errorMessage: string;
+    errorBody?: string | null;
+  }): Promise<void>;
+  pruneOldLlmCallLogs(olderThan: Date): Promise<void>;
+  getLlmCallLogs(filters: LlmCallLogFilters): Promise<{ logs: LlmCallLogWithUser[]; total: number }>;
+  getLlmCallSummary(filters: Omit<LlmCallLogFilters, "limit" | "offset">): Promise<LlmCallSummary>;
 }
 
 export class DatabaseStorage implements IStorage {
+  private buildLlmCallLogWhere(filters: Partial<Omit<LlmCallLogFilters, "limit" | "offset">>) {
+    const conditions: SQL<unknown>[] = [];
+
+    if (filters.from) conditions.push(gte(llmCallLogs.createdAt, filters.from));
+    if (filters.to) conditions.push(lte(llmCallLogs.createdAt, filters.to));
+    if (filters.model) conditions.push(eq(llmCallLogs.model, filters.model));
+    if (filters.status) conditions.push(eq(llmCallLogs.status, filters.status));
+    if (filters.operation) conditions.push(eq(llmCallLogs.operation, filters.operation));
+    if (filters.userId !== undefined) conditions.push(eq(llmCallLogs.userId, filters.userId));
+
+    return conditions.length > 0 ? and(...conditions) : undefined;
+  }
+
+  private formatLlmLogUser(user: {
+    id: number | null;
+    username: string | null;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  } | null) {
+    if (!user || user.id === null || user.email === null) return null;
+
+    const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ")
+      || user.username
+      || user.email;
+
+    return {
+      id: user.id,
+      username: user.username,
+      displayName,
+      email: user.email,
+    };
+  }
+
   private isMissingUsernameColumnError(error: unknown): boolean {
     return typeof error === "object"
       && error !== null
@@ -630,6 +719,137 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     return insight;
+  }
+
+  async createLlmCallLog(input: InsertLlmCallLog): Promise<LlmCallLog> {
+    const [log] = await db.insert(llmCallLogs)
+      .values(input)
+      .returning();
+
+    return log;
+  }
+
+  async markLlmCallLogFailed(logId: number, input: {
+    errorStage: string;
+    errorMessage: string;
+    errorBody?: string | null;
+  }): Promise<void> {
+    await db.update(llmCallLogs)
+      .set({
+        status: "error",
+        errorStage: input.errorStage,
+        errorMessage: input.errorMessage,
+        errorBody: input.errorBody ?? null,
+      })
+      .where(eq(llmCallLogs.id, logId));
+  }
+
+  async pruneOldLlmCallLogs(olderThan: Date): Promise<void> {
+    await db.delete(llmCallLogs)
+      .where(lt(llmCallLogs.createdAt, olderThan));
+  }
+
+  async getLlmCallLogs(filters: LlmCallLogFilters): Promise<{ logs: LlmCallLogWithUser[]; total: number }> {
+    const whereClause = this.buildLlmCallLogWhere(filters);
+
+    const [{ total }] = await db.select({
+      total: sql<number>`count(*)::int`,
+    })
+    .from(llmCallLogs)
+    .where(whereClause);
+
+    const rows = await db.select({
+      log: llmCallLogs,
+      user: {
+        id: users.id,
+        username: users.username,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+      },
+    })
+    .from(llmCallLogs)
+    .leftJoin(users, eq(llmCallLogs.userId, users.id))
+    .where(whereClause)
+    .orderBy(desc(llmCallLogs.createdAt))
+    .limit(filters.limit)
+    .offset(filters.offset);
+
+    return {
+      logs: rows.map((row) => ({
+        ...row.log,
+        user: this.formatLlmLogUser(row.user),
+      })),
+      total: Number(total ?? 0),
+    };
+  }
+
+  async getLlmCallSummary(filters: Omit<LlmCallLogFilters, "limit" | "offset">): Promise<LlmCallSummary> {
+    const whereClause = this.buildLlmCallLogWhere(filters);
+
+    const [summary] = await db.select({
+      totalCalls: sql<number>`count(*)::int`,
+      successfulCalls: sql<number>`count(*) filter (where ${llmCallLogs.status} = 'success')::int`,
+      erroredCalls: sql<number>`count(*) filter (where ${llmCallLogs.status} = 'error')::int`,
+      averageResponseTimeMs: sql<number | null>`round(avg(${llmCallLogs.responseTimeMs}))::int`,
+      p95ResponseTimeMs: sql<number | null>`round((percentile_cont(0.95) within group (order by ${llmCallLogs.responseTimeMs}))::numeric)::int`,
+      totalInputTokens: sql<number | null>`sum(${llmCallLogs.inputTokens})::int`,
+      totalOutputTokens: sql<number | null>`sum(${llmCallLogs.outputTokens})::int`,
+      totalTokens: sql<number | null>`sum(${llmCallLogs.totalTokens})::int`,
+    })
+    .from(llmCallLogs)
+    .where(whereClause);
+
+    const byModelRows = await db.select({
+      model: llmCallLogs.model,
+      totalCalls: sql<number>`count(*)::int`,
+      erroredCalls: sql<number>`count(*) filter (where ${llmCallLogs.status} = 'error')::int`,
+      averageResponseTimeMs: sql<number | null>`round(avg(${llmCallLogs.responseTimeMs}))::int`,
+    })
+    .from(llmCallLogs)
+    .where(whereClause)
+    .groupBy(llmCallLogs.model)
+    .orderBy(sql`count(*) desc`);
+
+    const recentErrorsWhere = and(
+      ...(whereClause ? [whereClause] : []),
+      eq(llmCallLogs.status, "error")
+    );
+
+    const recentErrors = await db.select({
+      errorStage: llmCallLogs.errorStage,
+      errorMessage: llmCallLogs.errorMessage,
+      count: sql<number>`count(*)::int`,
+      lastSeenAt: sql<Date>`max(${llmCallLogs.createdAt})`,
+    })
+    .from(llmCallLogs)
+    .where(recentErrorsWhere)
+    .groupBy(llmCallLogs.errorStage, llmCallLogs.errorMessage)
+    .orderBy(sql`max(${llmCallLogs.createdAt}) desc`)
+    .limit(10);
+
+    return {
+      totalCalls: Number(summary?.totalCalls ?? 0),
+      successfulCalls: Number(summary?.successfulCalls ?? 0),
+      erroredCalls: Number(summary?.erroredCalls ?? 0),
+      averageResponseTimeMs: summary?.averageResponseTimeMs == null ? null : Number(summary.averageResponseTimeMs),
+      p95ResponseTimeMs: summary?.p95ResponseTimeMs == null ? null : Number(summary.p95ResponseTimeMs),
+      totalInputTokens: summary?.totalInputTokens == null ? null : Number(summary.totalInputTokens),
+      totalOutputTokens: summary?.totalOutputTokens == null ? null : Number(summary.totalOutputTokens),
+      totalTokens: summary?.totalTokens == null ? null : Number(summary.totalTokens),
+      byModel: byModelRows.map((row) => ({
+        model: row.model,
+        totalCalls: Number(row.totalCalls),
+        erroredCalls: Number(row.erroredCalls),
+        averageResponseTimeMs: row.averageResponseTimeMs == null ? null : Number(row.averageResponseTimeMs),
+      })),
+      recentErrors: recentErrors.map((row) => ({
+        errorStage: row.errorStage,
+        errorMessage: row.errorMessage,
+        count: Number(row.count),
+        lastSeenAt: row.lastSeenAt,
+      })),
+    };
   }
 }
 

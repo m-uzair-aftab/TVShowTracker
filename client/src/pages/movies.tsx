@@ -5,6 +5,7 @@ import { queryClient } from '@/lib/queryClient';
 import { SearchForm } from '@/components/search-form';
 import { MovieResultsSection } from '@/components/movie-results-section';
 import { MyMovies } from '@/components/my-movies';
+import { AIInsights } from '@/components/ai-insights';
 import { Movie } from '@shared/schema';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -24,6 +25,8 @@ export default function MoviesHome() {
     const tabParam = params?.tab;
     if (tabParam === 'search') {
       setActiveTab('search');
+    } else if (tabParam === 'ai-insights') {
+      setActiveTab('ai-insights');
     } else {
       setActiveTab('mymovies');
     }
@@ -58,14 +61,17 @@ export default function MoviesHome() {
             setActiveTab(value);
             if (value === 'search') {
               window.history.replaceState(null, '', '/movies/search');
+            } else if (value === 'ai-insights') {
+              window.history.replaceState(null, '', '/movies/ai-insights');
             } else {
               window.history.replaceState(null, '', '/movies');
             }
           }}
         >
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-8">
+          <TabsList className="grid w-full max-w-xl mx-auto grid-cols-3 mb-8">
             <TabsTrigger value="mymovies">My Movies</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
+            <TabsTrigger value="ai-insights">AI Insights</TabsTrigger>
           </TabsList>
 
           <TabsContent value="search" className="mt-0">
@@ -92,6 +98,10 @@ export default function MoviesHome() {
 
           <TabsContent value="mymovies" className="mt-0">
             <MyMovies onSwitchToSearch={() => setActiveTab('search')} />
+          </TabsContent>
+
+          <TabsContent value="ai-insights" className="mt-0">
+            <AIInsights mediaType="movie" />
           </TabsContent>
         </Tabs>
       </main>

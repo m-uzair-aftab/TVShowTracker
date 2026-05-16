@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, uniqueIndex, date, primaryKey, varchar, json } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, uniqueIndex, date, primaryKey, varchar, json, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -195,6 +195,9 @@ export type AiInsightSourceSummary = {
   showCount?: number;
   watchedSeasonCount?: number;
   ratedSeasonCount?: number;
+  movieCount?: number;
+  watchedMovieCount?: number;
+  ratedMovieCount?: number;
   averageRating?: number | null;
   genreCount?: number;
   dateRange?: {
@@ -228,6 +231,51 @@ export const userAiInsights = pgTable("user_ai_insights", {
 export const userAiInsightsRelations = relations(userAiInsights, ({ one }) => ({
   user: one(users, {
     fields: [userAiInsights.userId],
+    references: [users.id],
+  }),
+}));
+
+export type LlmCallStatus = "success" | "error";
+
+export type LlmUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
+
+export const llmCallLogs = pgTable("llm_call_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  provider: text("provider").notNull(),
+  operation: text("operation").notNull(),
+  model: text("model").notNull(),
+  promptVersion: text("prompt_version"),
+  requestPayload: json("request_payload").notNull(),
+  outputText: text("output_text"),
+  rawResponse: json("raw_response"),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  totalTokens: integer("total_tokens"),
+  responseTimeMs: integer("response_time_ms").notNull(),
+  status: text("status").$type<LlmCallStatus>().notNull(),
+  errorStage: text("error_stage"),
+  errorMessage: text("error_message"),
+  errorStatusCode: integer("error_status_code"),
+  errorBody: text("error_body"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    createdAtIdx: index("llm_call_logs_created_at_idx").on(table.createdAt),
+    statusIdx: index("llm_call_logs_status_idx").on(table.status),
+    operationIdx: index("llm_call_logs_operation_idx").on(table.operation),
+    modelIdx: index("llm_call_logs_model_idx").on(table.model),
+    userIdx: index("llm_call_logs_user_id_idx").on(table.userId),
+  };
+});
+
+export const llmCallLogsRelations = relations(llmCallLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [llmCallLogs.userId],
     references: [users.id],
   }),
 }));
@@ -281,6 +329,11 @@ export const insertUserAiInsightSchema = createInsertSchema(userAiInsights).omit
   updatedAt: true,
 });
 
+export const insertLlmCallLogSchema = createInsertSchema(llmCallLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Extended schema for validation
 export const seasonProgressValidationSchema = z.object({
   seasonNumber: z.number().int().positive(),
@@ -329,3 +382,6 @@ export type UserShareSettings = typeof userShareSettings.$inferSelect;
 
 export type InsertUserAiInsight = z.infer<typeof insertUserAiInsightSchema>;
 export type UserAiInsight = typeof userAiInsights.$inferSelect;
+
+export type InsertLlmCallLog = typeof llmCallLogs.$inferInsert;
+export type LlmCallLog = typeof llmCallLogs.$inferSelect;

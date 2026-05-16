@@ -12,6 +12,7 @@ coverage/
 .env
 .env.*
 !.env.example
+docs/LOCAL_TEST_USERS.md
 *.pem
 *.key
 *.cert

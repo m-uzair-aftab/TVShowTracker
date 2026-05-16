@@ -64,7 +64,7 @@ Navigation should stay predictable and lightweight.
 - Preserve the TV/Movies segmented switch in the header for authenticated app views.
 - Use tabs for major view switches inside a domain:
   - TV: `My TV Shows` and `Search`.
-  - Movies: `My Movies` and `Search`.
+  - Movies: `My Movies`, `Search`, and `AI Insights`.
   - Shared list: `TV Shows` and `Movies`.
 - Keep tab lists compact: `TabsList` with `grid`, two columns, and `max-w-md`.
 - Detail pages should use a clear ghost "Back" button and preserve context back to list or search where possible.

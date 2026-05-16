@@ -15,6 +15,7 @@ import MovieDetails from "@/pages/movie-details";
 import AuthPage from "@/pages/auth-page";
 import SettingsPage from "@/pages/settings";
 import SharedListPage from "@/pages/shared-list";
+import LlmObservabilityPage from "@/pages/llm-observability";
 
 function Router() {
   return (
@@ -57,6 +58,11 @@ function Router() {
           <MoviesHome />
         </ProtectedRoute>
       </Route>
+      <Route path="/movies/ai-insights">
+        <ProtectedRoute>
+          <MoviesHome />
+        </ProtectedRoute>
+      </Route>
       <Route path="/movie/:id">
         {(params) => (
           <ProtectedRoute>
@@ -67,6 +73,11 @@ function Router() {
       <Route path="/settings">
         <ProtectedRoute>
           <SettingsPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/observability/llm">
+        <ProtectedRoute>
+          <LlmObservabilityPage />
         </ProtectedRoute>
       </Route>
       <Route>
