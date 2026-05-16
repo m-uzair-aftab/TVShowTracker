@@ -294,7 +294,13 @@ function RefreshProfileState({
   );
 }
 
-function EmptyProfileState({ copy }: { copy: AiInsightsCopy }) {
+function EmptyProfileState({
+  copy,
+  action,
+}: {
+  copy: AiInsightsCopy;
+  action: ReactNode;
+}) {
   return (
     <div className="rounded-lg border border-primary/15 bg-primary/5 py-12 text-center">
       <Sparkles className="mx-auto h-8 w-8 text-primary" />
@@ -302,6 +308,9 @@ function EmptyProfileState({ copy }: { copy: AiInsightsCopy }) {
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
         {copy.emptyDescription}
       </p>
+      <div className="mt-5 flex justify-center">
+        {action}
+      </div>
     </div>
   );
 }
@@ -347,6 +356,18 @@ function TasteProfileSection({ copy }: { copy: AiInsightsCopy }) {
     : profile || isOutdated
       ? <RefreshCw className="h-3.5 w-3.5" />
       : <Sparkles className="h-3.5 w-3.5" />;
+  const actionButton = (
+    <Button
+      onClick={() => regenerateMutation.mutate()}
+      disabled={regenerateMutation.isPending}
+      variant={profile ? 'outline' : 'default'}
+      size="sm"
+      className={profile ? 'h-8 bg-background/80 px-2.5 text-xs [&_svg]:size-3.5' : 'h-8 px-2.5 text-xs [&_svg]:size-3.5'}
+    >
+      {actionIcon}
+      {regenerateMutation.isPending ? 'Generating' : actionLabel}
+    </Button>
+  );
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -400,29 +421,22 @@ function TasteProfileSection({ copy }: { copy: AiInsightsCopy }) {
                 generatedAt={insight?.generatedAt}
               />
             ) : (
-              <EmptyProfileState copy={copy} />
+              <EmptyProfileState copy={copy} action={actionButton} />
             )}
 
-            <div className="mt-6 flex justify-end">
-              <div className="flex flex-col items-end gap-1.5">
-                <Button
-                  onClick={() => regenerateMutation.mutate()}
-                  disabled={regenerateMutation.isPending}
-                  variant={profile ? 'outline' : 'default'}
-                  size="sm"
-                  className={profile ? 'h-8 bg-background/80 px-2.5 text-xs [&_svg]:size-3.5' : 'h-8 px-2.5 text-xs [&_svg]:size-3.5'}
-                >
-                  {actionIcon}
-                  {regenerateMutation.isPending ? 'Generating' : actionLabel}
-                </Button>
-                {profile && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>Generated {formatDateTime(insight!.generatedAt)}</span>
-                  </div>
-                )}
+            {insight && (
+              <div className="mt-6 flex justify-end">
+                <div className="flex flex-col items-end gap-1.5">
+                  {actionButton}
+                  {profile && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Generated {formatDateTime(insight!.generatedAt)}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </CardContent>
         </CollapsibleContent>
       </Card>
