@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Film, Loader2, Tv } from 'lucide-react';
+import { Film, Loader2, Sparkles, Tv } from 'lucide-react';
+import { getTasteProfileDisplayData, TasteProfileCard, type TasteProfileInsightLike } from '@/components/ai-insights';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,6 +44,10 @@ interface SharedListResponse {
   selectedYear: string | null;
   tvShows: PublicShow[];
   movies: PublicMovie[];
+  tasteProfiles?: {
+    tv: TasteProfileInsightLike | null;
+    movie: TasteProfileInsightLike | null;
+  };
 }
 
 interface SharedListPageProps {
@@ -104,6 +109,9 @@ export default function SharedListPage({ username }: SharedListPageProps) {
       ? data.sharedYears.join(', ')
       : 'No years selected';
   const showYearFilter = data.includeAllYears && data.availableYears.length > 0;
+  const tvTasteProfile = getTasteProfileDisplayData(data.tasteProfiles?.tv, 'tv');
+  const movieTasteProfile = getTasteProfileDisplayData(data.tasteProfiles?.movie, 'movie');
+  const hasTasteProfiles = Boolean(tvTasteProfile || movieTasteProfile);
 
   return (
     <div className="max-w-5xl mx-auto py-8">
@@ -132,7 +140,7 @@ export default function SharedListPage({ username }: SharedListPageProps) {
       </div>
 
       <Tabs defaultValue="tv" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2 mb-8">
+        <TabsList className={`grid w-full mb-8 ${hasTasteProfiles ? 'max-w-xl grid-cols-3' : 'max-w-md grid-cols-2'}`}>
           <TabsTrigger value="tv" className="gap-2">
             <Tv className="h-4 w-4" />
             TV Shows
@@ -141,6 +149,13 @@ export default function SharedListPage({ username }: SharedListPageProps) {
             <Film className="h-4 w-4" />
             Movies
           </TabsTrigger>
+          {hasTasteProfiles && (
+            <TabsTrigger value="taste-profiles" className="gap-2">
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">Taste Profiles</span>
+              <span className="sm:hidden">Profiles</span>
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="tv" className="mt-0">
@@ -166,6 +181,38 @@ export default function SharedListPage({ username }: SharedListPageProps) {
             <EmptyState label="No movies are included in this shared list." />
           )}
         </TabsContent>
+
+        {hasTasteProfiles && (
+          <TabsContent value="taste-profiles" className="mt-0">
+            <div className="space-y-6">
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                These profiles are AI-generated for {data.owner.displayName} from their shared TV and movie history.
+              </p>
+
+              <div className="space-y-4">
+                {tvTasteProfile && (
+                  <TasteProfileCard
+                    mediaType="tv"
+                    profile={tvTasteProfile.profile}
+                    title="TV Profile"
+                    generatedAt={tvTasteProfile.generatedAt}
+                    defaultOpen={false}
+                  />
+                )}
+
+                {movieTasteProfile && (
+                  <TasteProfileCard
+                    mediaType="movie"
+                    profile={movieTasteProfile.profile}
+                    title="Movie Profile"
+                    generatedAt={movieTasteProfile.generatedAt}
+                    defaultOpen={false}
+                  />
+                )}
+              </div>
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

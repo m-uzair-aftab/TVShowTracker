@@ -10,17 +10,22 @@ TVShowTracker helps users keep a personal record of TV shows and movies, includi
 - Personal TV list with season progress, watched seasons, average rating, grade, and year filtering.
 - AI Insights tab for a stored TV Taste Profile generated from watched seasons, ratings, genres, and activity.
 - AI Insights tab for a stored Movie Taste Profile generated from watched movies, ratings, genres, and activity.
+- AI Taste Profile summaries describe taste patterns without listing specific watched show or movie titles.
+- AI Taste Profile generation requires at least one watched or rated TV season or movie before calling the LLM provider.
+- AI Taste Profile Top Genres use actual saved genres from watched or rated TV/movie metadata rather than broader style or storytelling labels.
+- AI Taste Profiles can include a TV/movie taste archetype with primary, secondary, avoidance, and recommendation north-star signals once the user's watched or rated history reaches healthy confidence.
 - AI generation failures show friendly retry copy in the UI while detailed provider diagnostics remain in backend logs.
 - Operator-only LLM Observability dashboard with raw prompts, outputs, model metadata, token usage, latency, errors, and summary metrics.
 - Personal movie list with watched date, rating, watched platform, sorting, year filtering, and CSV export.
-- Settings page for enabling a public shared list.
+- Settings page for enabling a public shared list and optional public Taste Profiles.
 - Read-only public shared-list pages at `/:username/shared-list`.
+- Optional public Taste Profiles tab on shared-list pages when the owner opts in and generated TV or Movie Taste Profiles exist.
 
 ## Public Shared Lists
 
-Users can choose a public username, enable sharing, and decide whether to share all years or selected years.
+Users can choose a public username, enable sharing, decide whether to share all years or selected years, and separately choose whether generated Taste Profiles can appear publicly.
 
-Public viewers do not need an account. The shared page shows TV Shows and Movies tabs while hiding private edit controls and management actions.
+Public viewers do not need an account. The shared page shows TV Shows and Movies tabs while hiding private edit controls and management actions. If public Taste Profiles are available, a third tab shows collapsed AI-generated profile cards.
 
 ## Tech Stack
 

@@ -21,7 +21,7 @@ Key responsibilities:
 - Route users through account, TV, movie, settings, and public shared-list pages.
 - Fetch API data through shared query helpers.
 - Store authenticated user state with TanStack Query.
-- Render personal list views and read-only public shared-list views.
+- Render personal list views and read-only public shared-list views, including optional public Taste Profiles.
 
 ## Backend
 
@@ -31,9 +31,14 @@ Key responsibilities:
 
 - Expose API routes under `/api`.
 - Authenticate users with JWT bearer tokens and session fallback support.
-- Store user lists, ratings, progress, and sharing settings.
+- Store user lists, ratings, progress, and sharing settings, including whether AI Taste Profiles may appear publicly.
 - Fetch and normalize TVmaze and TMDB search/detail data.
 - Generate and persist TV and movie AI insights from authenticated user history.
+- Repair narrow malformed AI profile string arrays and retry model-output failures before surfacing generation errors.
+- Validate AI taste summaries before persistence so overall TV/movie summaries do not name exact supplied titles.
+- Constrain AI Top Genres to actual saved genres from watched or rated source metadata before persistence.
+- Gate optional AI taste archetypes through the AI insight evaluation context so they are stored and shown only for healthy-signal profiles.
+- Short-circuit AI insight generation before provider calls when a user has no watched or rated history.
 - Route every LLM provider call through the shared `server/llm-client.ts` observability layer.
 - Sanitize AI provider failures before returning them to clients while storing structured diagnostics for the failed stage, provider, model, upstream status, upstream response body, request payload, output, token usage, and response time.
 
@@ -48,8 +53,8 @@ Important data areas include:
 - User TV watchlists and season progress
 - Movie metadata
 - User movie lists and movie activity
-- Public share settings
-- Stored AI insights for TV and movies, including media type, insight type, profile JSON, source summary, model, and generation timestamps
+- Public share settings, including list visibility, shared years, and optional Taste Profile sharing
+- Stored AI insights for TV and movies, including media type, insight type, profile JSON with title-safe summaries, source-constrained top genres, and optional healthy-signal taste archetypes, source summary, model, and generation timestamps
 - LLM call logs, including raw request payloads, outputs, provider responses, provider/model metadata, token usage, latency, errors, and associated user identity
 - Session storage
 
@@ -69,7 +74,7 @@ Users can enable sharing from Settings. Public list URLs use this shape:
 /:username/shared-list
 ```
 
-Public shared-list pages are read-only and hide private edit controls.
+Public shared-list pages are read-only and hide private edit controls. When users opt in to sharing Taste Profiles, the shared-list response can include existing stored TV and movie Taste Profiles; public shared-list routes never generate new AI profiles.
 
 ## Environment Variables
 

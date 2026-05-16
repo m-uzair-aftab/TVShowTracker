@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, Eye, Loader2, RefreshCw, Search } from 'lucide-react';
+import { AlertCircle, Check, Copy, Eye, Loader2, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -126,9 +127,66 @@ function dateToIso(date: string, endOfDay = false) {
   return new Date(`${date}${suffix}`).toISOString();
 }
 
-function LogDetails({ log }: { log: LlmCallLog }) {
+function PayloadSection({
+  label,
+  value,
+  copiedLabel,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  copiedLabel: string | null;
+  onCopy: (label: string, value: string) => void;
+}) {
+  const isCopied = copiedLabel === label;
+
   return (
-    <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+    <div className="min-w-0 space-y-2">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <Label>{label}</Label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => onCopy(label, value)}
+          aria-label={`Copy ${label.toLowerCase()}`}
+          title={`Copy ${label.toLowerCase()}`}
+        >
+          {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+        </Button>
+      </div>
+      <pre className="max-h-80 max-w-full overflow-auto rounded-md border bg-muted/20 p-3 text-xs whitespace-pre">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
+function LogDetails({ log }: { log: LlmCallLog }) {
+  const { toast } = useToast();
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+
+  const copyPayload = async (label: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedLabel(label);
+      toast({
+        title: 'Copied',
+        description: `${label} copied to clipboard.`,
+      });
+      window.setTimeout(() => setCopiedLabel((current) => (current === label ? null : current)), 1600);
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'The payload could not be copied to the clipboard.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  return (
+    <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[85vh] overflow-x-hidden overflow-y-auto">
       <DialogHeader>
         <DialogTitle className="text-xl">LLM call #{log.id}</DialogTitle>
         <DialogDescription>
@@ -168,19 +226,19 @@ function LogDetails({ log }: { log: LlmCallLog }) {
         </Alert>
       )}
 
-      <div className="space-y-2">
-        <Label>Request payload</Label>
-        <pre className="max-h-80 overflow-auto rounded-md border bg-muted/20 p-3 text-xs whitespace-pre-wrap">
-          {prettyJson(log.requestPayload)}
-        </pre>
-      </div>
+      <PayloadSection
+        label="Request payload"
+        value={prettyJson(log.requestPayload)}
+        copiedLabel={copiedLabel}
+        onCopy={copyPayload}
+      />
 
-      <div className="space-y-2">
-        <Label>Output</Label>
-        <pre className="max-h-80 overflow-auto rounded-md border bg-muted/20 p-3 text-xs whitespace-pre-wrap">
-          {log.outputText || 'None'}
-        </pre>
-      </div>
+      <PayloadSection
+        label="Output"
+        value={log.outputText || 'None'}
+        copiedLabel={copiedLabel}
+        onCopy={copyPayload}
+      />
 
       {log.errorBody && (
         <div className="space-y-2">
@@ -191,12 +249,12 @@ function LogDetails({ log }: { log: LlmCallLog }) {
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label>Raw response</Label>
-        <pre className="max-h-80 overflow-auto rounded-md border bg-muted/20 p-3 text-xs whitespace-pre-wrap">
-          {prettyJson(log.rawResponse)}
-        </pre>
-      </div>
+      <PayloadSection
+        label="Raw payload"
+        value={prettyJson(log.rawResponse)}
+        copiedLabel={copiedLabel}
+        onCopy={copyPayload}
+      />
     </DialogContent>
   );
 }

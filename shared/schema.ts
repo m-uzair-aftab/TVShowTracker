@@ -162,6 +162,7 @@ export const userShareSettings = pgTable("user_share_settings", {
   enabled: boolean("enabled").default(false).notNull(),
   includeAllYears: boolean("include_all_years").default(true).notNull(),
   sharedYears: json("shared_years").$type<string[]>().default([]).notNull(),
+  shareTasteProfiles: boolean("share_taste_profiles").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {
@@ -183,12 +184,20 @@ export const aiInsightTypes = ["taste_profile"] as const;
 export type AiMediaType = typeof aiMediaTypes[number];
 export type AiInsightType = typeof aiInsightTypes[number];
 
+export type AiTasteArchetype = {
+  primary: string;
+  secondary: string[];
+  avoidancePattern: string;
+  recommendationNorthStar: string;
+};
+
 export type AiTasteProfile = {
   tasteSummary: string;
   topGenres: string[];
   favoritePatterns: string[];
   recentTrends?: string[];
   discoveryLanes: string[];
+  tasteArchetype?: AiTasteArchetype | null;
 };
 
 export type AiInsightSourceSummary = {

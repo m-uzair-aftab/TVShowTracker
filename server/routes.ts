@@ -14,7 +14,12 @@ import {
 import { z } from "zod";
 import { searchShows, getShowDetails } from "./tvmaze-api";
 import { searchMovies, getMovieDetails } from "./tmdb-api";
-import { generateMovieTasteProfile, generateTvTasteProfile, isAiGenerationError } from "./ai-insights";
+import {
+  generateMovieTasteProfile,
+  generateTvTasteProfile,
+  isAiGenerationError,
+  isAiInsufficientSignalError,
+} from "./ai-insights";
 
 const reservedUsernames = new Set([
   "auth",
@@ -47,6 +52,7 @@ const shareSettingsUpdateSchema = z.object({
   enabled: z.boolean().optional(),
   includeAllYears: z.boolean().optional(),
   sharedYears: z.array(z.string().regex(/^\d{4}$/)).optional(),
+  shareTasteProfiles: z.boolean().optional(),
 });
 
 const llmStatusSchema = z.enum(["success", "error"]);
@@ -160,6 +166,18 @@ function compareNullableRatings(a: number | null, b: number | null) {
   return b - a;
 }
 
+function serializePublicTasteProfile(
+  insight: Awaited<ReturnType<typeof storage.getUserAiInsight>> | null
+) {
+  if (!insight) return null;
+
+  return {
+    profile: insight.profile,
+    promptVersion: insight.promptVersion,
+    generatedAt: insight.generatedAt,
+  };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
   setupAuth(app);
@@ -180,6 +198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enabled: settings?.enabled ?? false,
         includeAllYears: settings?.includeAllYears ?? true,
         sharedYears: settings?.sharedYears ?? [],
+        shareTasteProfiles: settings?.shareTasteProfiles ?? false,
         availableYears,
         publicPath: user?.username ? `/${user.username}/shared-list` : null,
       });
@@ -219,6 +238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nextSharedYears = parsed.sharedYears !== undefined
         ? Array.from(new Set(parsed.sharedYears)).filter((year) => availableYearSet.has(year)).sort((a, b) => Number(b) - Number(a))
         : currentSettings.sharedYears;
+      const nextShareTasteProfiles = parsed.shareTasteProfiles ?? currentSettings.shareTasteProfiles;
 
       if (nextEnabled && !nextUsername) {
         return res.status(400).json({ message: "Choose a username before turning sharing on" });
@@ -236,6 +256,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enabled: nextEnabled,
         includeAllYears: nextIncludeAllYears,
         sharedYears: nextSharedYears,
+        shareTasteProfiles: nextShareTasteProfiles,
       });
 
       res.json({
@@ -243,6 +264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enabled: updatedSettings.enabled,
         includeAllYears: updatedSettings.includeAllYears,
         sharedYears: updatedSettings.sharedYears,
+        shareTasteProfiles: updatedSettings.shareTasteProfiles,
         availableYears,
         publicPath: nextUsername ? `/${nextUsername}/shared-list` : null,
       });
@@ -281,6 +303,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const shouldFilterByYear = Boolean(activeYear) || !settings.includeAllYears;
       const tvShows = await storage.getUserWatchlistWithActivity(user.id);
       const movies = await storage.getUserMovieListWithActivity(user.id);
+      const [tvTasteProfile, movieTasteProfile] = settings.shareTasteProfiles
+        ? await Promise.all([
+          storage.getUserAiInsight(user.id, "tv", "taste_profile"),
+          storage.getUserAiInsight(user.id, "movie", "taste_profile"),
+        ])
+        : [null, null];
 
       const sharedShows = tvShows
         .map((item) => {
@@ -342,6 +370,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedYear: activeYear,
         tvShows: sharedShows,
         movies: sharedMovies,
+        tasteProfiles: {
+          tv: serializePublicTasteProfile(tvTasteProfile),
+          movie: serializePublicTasteProfile(movieTasteProfile),
+        },
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -420,6 +452,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ insight });
     } catch (error) {
+      if (isAiInsufficientSignalError(error)) {
+        return res.status(400).json({
+          message: error.message,
+          code: error.code,
+        });
+      }
+
       if (isAiGenerationError(error)) {
         console.error("AI taste profile generation failed", {
           route: "POST /api/ai-insights/tv/taste-profile/regenerate",
@@ -497,6 +536,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ insight });
     } catch (error) {
+      if (isAiInsufficientSignalError(error)) {
+        return res.status(400).json({
+          message: error.message,
+          code: error.code,
+        });
+      }
+
       if (isAiGenerationError(error)) {
         console.error("AI movie taste profile generation failed", {
           route: "POST /api/ai-insights/movie/taste-profile/regenerate",

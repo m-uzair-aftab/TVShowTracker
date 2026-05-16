@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { AlertCircle, Brain, ChevronDown, ChevronUp, Clock, Compass, Layers, RefreshCw, Sparkles, TrendingUp } from 'lucide-react';
+import { AlertCircle, Brain, ChevronDown, ChevronUp, Clock, Compass, Layers, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { AiInsightSourceSummary, AiTasteProfile } from '@shared/schema';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -25,7 +25,7 @@ type TasteProfileInsight = {
   updatedAt: string;
 };
 
-type AiInsightsMediaType = 'tv' | 'movie';
+export type AiInsightsMediaType = 'tv' | 'movie';
 
 type AiInsightsCopy = {
   queryKey: string[];
@@ -35,6 +35,7 @@ type AiInsightsCopy = {
   sectionDescription: string;
   contentTitle: string;
   cardDescription: string;
+  archetypeTitle: string;
   favoritePatternsDescription: string;
   emptyDescription: string;
   savedToastDescription: string;
@@ -44,11 +45,12 @@ const AI_INSIGHTS_COPY: Record<AiInsightsMediaType, AiInsightsCopy> = {
   tv: {
     queryKey: ['/api/ai-insights/tv/taste-profile'],
     regeneratePath: '/api/ai-insights/tv/taste-profile/regenerate',
-    promptVersion: 'tv-taste-profile-v3',
+    promptVersion: 'tv-taste-profile-v8',
     fallbackGenerationError: 'Failed to generate TV taste profile. Please try again later.',
     sectionDescription: 'Short, saved insights generated from your personal TV history.',
     contentTitle: 'Your TV Taste',
     cardDescription: 'A recommendation-ready read on what your TV history says about you.',
+    archetypeTitle: 'Your TV taste archetype',
     favoritePatternsDescription: 'Traits your watched and rated shows suggest you already enjoy.',
     emptyDescription: 'Generate a short TV taste card from your watched seasons, ratings, genres, and activity.',
     savedToastDescription: 'Your TV taste profile has been saved.',
@@ -56,11 +58,12 @@ const AI_INSIGHTS_COPY: Record<AiInsightsMediaType, AiInsightsCopy> = {
   movie: {
     queryKey: ['/api/ai-insights/movie/taste-profile'],
     regeneratePath: '/api/ai-insights/movie/taste-profile/regenerate',
-    promptVersion: 'movie-taste-profile-v1',
+    promptVersion: 'movie-taste-profile-v6',
     fallbackGenerationError: 'Failed to generate movie taste profile. Please try again later.',
     sectionDescription: 'Short, saved insights generated from your personal movie history.',
     contentTitle: 'Your Movie Taste',
     cardDescription: 'A recommendation-ready read on what your movie history says about you.',
+    archetypeTitle: 'Your movie taste archetype',
     favoritePatternsDescription: 'Traits your watched and rated movies suggest you already enjoy.',
     emptyDescription: 'Generate a short movie taste card from your watched movies, ratings, genres, and activity.',
     savedToastDescription: 'Your movie taste profile has been saved.',
@@ -95,7 +98,32 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
-function isTasteProfileV2(profile: unknown): profile is AiTasteProfile {
+function isTasteArchetype(value: unknown): value is NonNullable<AiTasteProfile['tasteArchetype']> {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+
+  return typeof candidate.primary === 'string'
+    && candidate.primary.trim().length > 0
+    && isStringArray(candidate.secondary)
+    && candidate.secondary.some((item) => item.trim().length > 0)
+    && typeof candidate.avoidancePattern === 'string'
+    && candidate.avoidancePattern.trim().length > 0
+    && typeof candidate.recommendationNorthStar === 'string'
+    && candidate.recommendationNorthStar.trim().length > 0;
+}
+
+export type TasteProfileInsightLike = {
+  profile: unknown;
+  promptVersion: string;
+  generatedAt?: string | null;
+};
+
+export type TasteProfileDisplayData = {
+  profile: AiTasteProfile;
+  generatedAt?: string;
+};
+
+export function isTasteProfileV2(profile: unknown): profile is AiTasteProfile {
   if (!profile || typeof profile !== 'object') return false;
   const candidate = profile as Record<string, unknown>;
 
@@ -103,7 +131,30 @@ function isTasteProfileV2(profile: unknown): profile is AiTasteProfile {
     && isStringArray(candidate.topGenres)
     && isStringArray(candidate.favoritePatterns)
     && isStringArray(candidate.discoveryLanes)
-    && (candidate.recentTrends === undefined || isStringArray(candidate.recentTrends));
+    && (candidate.recentTrends === undefined || isStringArray(candidate.recentTrends))
+    && (
+      candidate.tasteArchetype === undefined
+      || candidate.tasteArchetype === null
+      || typeof candidate.tasteArchetype === 'object'
+    );
+}
+
+export function getTasteProfileDisplayData(
+  insight: TasteProfileInsightLike | null | undefined,
+  mediaType: AiInsightsMediaType
+): TasteProfileDisplayData | null {
+  if (!insight || insight.promptVersion !== AI_INSIGHTS_COPY[mediaType].promptVersion) {
+    return null;
+  }
+
+  if (!isTasteProfileV2(insight.profile)) {
+    return null;
+  }
+
+  return {
+    profile: insight.profile,
+    generatedAt: insight.generatedAt ?? undefined,
+  };
 }
 
 function InsightSkeleton() {
@@ -184,6 +235,77 @@ function SectionHeader({
   );
 }
 
+function OutlinedInsightSection({ children }: { children: ReactNode }) {
+  return (
+    <section className="space-y-3 rounded-md border bg-background p-4">
+      {children}
+    </section>
+  );
+}
+
+function TasteArchetypeSection({
+  archetype,
+  title,
+}: {
+  archetype: NonNullable<AiTasteProfile['tasteArchetype']>;
+  title: string;
+}) {
+  const secondary = archetype.secondary.map((item) => item.trim()).filter(Boolean).slice(0, 4);
+
+  if (!archetype.primary || secondary.length === 0 || !archetype.avoidancePattern || !archetype.recommendationNorthStar) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      <SectionHeader
+        title={title}
+        description="A compact label for the strongest recommendation signals in your history."
+        icon={<Brain className="h-4 w-4" />}
+      />
+
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase text-muted-foreground">Primary archetype</p>
+          <Badge
+            variant="outline"
+            className="border-primary/20 bg-background text-foreground"
+          >
+            {archetype.primary}
+          </Badge>
+          <div className="space-y-2 pt-1">
+            <p className="text-xs font-bold uppercase text-muted-foreground">Secondary archetypes</p>
+            <div className="flex flex-wrap gap-2">
+              {secondary.map((item) => (
+                <Badge key={item} variant="outline" className="border-primary/20 bg-background text-foreground">
+                  {item}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div>
+            <p className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
+              <AlertCircle className="h-3.5 w-3.5" />
+              Avoidance pattern
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-foreground">{archetype.avoidancePattern}</p>
+          </div>
+          <div>
+            <p className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
+              <Target className="h-3.5 w-3.5" />
+              Recommendation north star
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-foreground">{archetype.recommendationNorthStar}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TasteProfileContent({
   profile,
   copy,
@@ -194,10 +316,11 @@ function TasteProfileContent({
   const favoritePatterns = profile.favoritePatterns.filter(Boolean).slice(0, MAX_PATTERN_ITEMS);
   const discoveryLanes = profile.discoveryLanes.filter(Boolean).slice(0, MAX_DISCOVERY_ITEMS);
   const recentTrends = (profile.recentTrends?.filter(Boolean) ?? []).slice(0, MAX_RECENT_TREND_ITEMS);
+  const archetype = isTasteArchetype(profile.tasteArchetype) ? profile.tasteArchetype : null;
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
+      <OutlinedInsightSection>
         <SectionHeader
           title={copy.contentTitle}
           description="A quick read on what someone should recommend to you."
@@ -206,9 +329,9 @@ function TasteProfileContent({
         <p className="max-w-4xl text-base leading-relaxed text-foreground">
           {profile.tasteSummary}
         </p>
-      </div>
+      </OutlinedInsightSection>
 
-      <div className="space-y-3">
+      <OutlinedInsightSection>
         <SectionHeader title="Top Genres" icon={<Layers className="h-4 w-4" />} />
         <div className="flex flex-wrap gap-2">
           {profile.topGenres.map((genre) => (
@@ -217,10 +340,16 @@ function TasteProfileContent({
             </Badge>
           ))}
         </div>
-      </div>
+      </OutlinedInsightSection>
+
+      {archetype && (
+        <OutlinedInsightSection>
+          <TasteArchetypeSection archetype={archetype} title={copy.archetypeTitle} />
+        </OutlinedInsightSection>
+      )}
 
       <div className="grid gap-5 md:grid-cols-2">
-        <div className="space-y-3">
+        <OutlinedInsightSection>
           <SectionHeader
             title="Favorite Patterns"
             description={copy.favoritePatternsDescription}
@@ -233,9 +362,9 @@ function TasteProfileContent({
               </InsightTile>
             ))}
           </div>
-        </div>
+        </OutlinedInsightSection>
 
-        <div className="space-y-3">
+        <OutlinedInsightSection>
           <SectionHeader
             title="Discovery Lanes"
             description="Directions your taste could explore next."
@@ -248,10 +377,10 @@ function TasteProfileContent({
               </InsightTile>
             ))}
           </div>
-        </div>
+        </OutlinedInsightSection>
       </div>
 
-      <div className="space-y-3">
+      <OutlinedInsightSection>
         <SectionHeader
           title="Recent Trends"
           description="Shifts that show up in your more recent activity."
@@ -270,7 +399,7 @@ function TasteProfileContent({
             Not enough dated activity yet to call a clear trend.
           </div>
         )}
-      </div>
+      </OutlinedInsightSection>
     </div>
   );
 }
@@ -315,7 +444,80 @@ function EmptyProfileState({
   );
 }
 
-function TasteProfileSection({ copy }: { copy: AiInsightsCopy }) {
+export function TasteProfileCard({
+  mediaType,
+  profile,
+  title = 'Taste profile',
+  generatedAt,
+  defaultOpen = true,
+  notices,
+  footerAction,
+}: {
+  mediaType: AiInsightsMediaType;
+  profile: AiTasteProfile;
+  title?: string;
+  generatedAt?: string;
+  defaultOpen?: boolean;
+  notices?: ReactNode;
+  footerAction?: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const copy = AI_INSIGHTS_COPY[mediaType];
+  const showFooter = Boolean(footerAction || generatedAt);
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <Card className="overflow-hidden">
+        <CardHeader className="gap-4 border-b border-primary/10 bg-primary/5 md:flex-row md:items-start md:justify-between md:space-y-0">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Brain className="h-5 w-5 text-primary" />
+              {title}
+            </CardTitle>
+            <CardDescription className="mt-2">
+              {copy.cardDescription}
+            </CardDescription>
+          </div>
+          <div className="flex w-full md:w-auto">
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full bg-background/80 md:w-auto"
+                aria-label={isOpen ? 'Collapse taste profile' : 'Expand taste profile'}
+              >
+                {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {isOpen ? 'Collapse' : 'Expand'}
+              </Button>
+            </CollapsibleTrigger>
+          </div>
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent className="p-6">
+            {notices}
+            <TasteProfileContent profile={profile} copy={copy} />
+
+            {showFooter && (
+              <div className="mt-6 flex justify-end">
+                <div className="flex flex-col items-end gap-1.5">
+                  {footerAction}
+                  {generatedAt && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Generated {formatDateTime(generatedAt)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
+function TasteProfileSection({ mediaType, copy }: { mediaType: AiInsightsMediaType; copy: AiInsightsCopy }) {
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(true);
   const { data, isLoading, error } = useQuery<AiInsightResponse>({
@@ -348,8 +550,10 @@ function TasteProfileSection({ copy }: { copy: AiInsightsCopy }) {
   }
 
   const insight = data?.insight ?? null;
-  const profile = isTasteProfileV2(insight?.profile) ? insight.profile : null;
-  const isOutdated = Boolean(insight && (insight.promptVersion !== copy.promptVersion || !profile));
+  const hasCurrentPromptVersion = insight?.promptVersion === copy.promptVersion;
+  const parsedProfile = isTasteProfileV2(insight?.profile) ? insight.profile : null;
+  const profile = hasCurrentPromptVersion ? parsedProfile : null;
+  const isOutdated = Boolean(insight && (!hasCurrentPromptVersion || !parsedProfile));
   const actionLabel = profile ? 'Regenerate' : isOutdated ? 'Regenerate profile' : 'Generate taste card';
   const actionIcon = regenerateMutation.isPending
     ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -368,6 +572,38 @@ function TasteProfileSection({ copy }: { copy: AiInsightsCopy }) {
       {regenerateMutation.isPending ? 'Generating' : actionLabel}
     </Button>
   );
+
+  if (profile) {
+    const notices = (
+      <>
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Failed to load taste profile</AlertTitle>
+            <AlertDescription>Please refresh the page and try again.</AlertDescription>
+          </Alert>
+        )}
+
+        {regenerateMutation.isError && insight && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Previous profile kept</AlertTitle>
+            <AlertDescription>The latest generation failed, so your saved profile was not changed.</AlertDescription>
+          </Alert>
+        )}
+      </>
+    );
+
+    return (
+      <TasteProfileCard
+        mediaType={mediaType}
+        profile={profile}
+        generatedAt={insight?.generatedAt}
+        notices={notices}
+        footerAction={actionButton}
+      />
+    );
+  }
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -455,7 +691,7 @@ export function AIInsights({ mediaType = 'tv' }: { mediaType?: AiInsightsMediaTy
           {copy.sectionDescription}
         </p>
       </div>
-      <TasteProfileSection copy={copy} />
+      <TasteProfileSection mediaType={mediaType} copy={copy} />
     </section>
   );
 }

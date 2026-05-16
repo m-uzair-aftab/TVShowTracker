@@ -105,7 +105,7 @@ export interface IStorage {
   // Share settings methods
   getUserShareSettings(userId: number): Promise<UserShareSettings | undefined>;
   getOrCreateUserShareSettings(userId: number): Promise<UserShareSettings>;
-  updateUserShareSettings(userId: number, settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears">>): Promise<UserShareSettings>;
+  updateUserShareSettings(userId: number, settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears" | "shareTasteProfiles">>): Promise<UserShareSettings>;
   getUserActivityYears(userId: number): Promise<string[]>;
 
   // AI insight methods
@@ -626,6 +626,7 @@ export class DatabaseStorage implements IStorage {
         enabled: false,
         includeAllYears: true,
         sharedYears: [],
+        shareTasteProfiles: false,
       })
       .returning();
 
@@ -634,7 +635,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserShareSettings(
     userId: number,
-    settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears">>
+    settings: Partial<Pick<UserShareSettings, "enabled" | "includeAllYears" | "sharedYears" | "shareTasteProfiles">>
   ): Promise<UserShareSettings> {
     await this.getOrCreateUserShareSettings(userId);
 

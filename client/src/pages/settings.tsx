@@ -16,6 +16,7 @@ interface ShareSettingsResponse {
   enabled: boolean;
   includeAllYears: boolean;
   sharedYears: string[];
+  shareTasteProfiles: boolean;
   availableYears: string[];
   publicPath: string | null;
 }
@@ -25,6 +26,7 @@ interface SettingsFormState {
   enabled: boolean;
   includeAllYears: boolean;
   sharedYears: string[];
+  shareTasteProfiles: boolean;
 }
 
 function normalizeYears(years: string[]) {
@@ -37,6 +39,7 @@ function formStateFromSettings(settings: ShareSettingsResponse): SettingsFormSta
     enabled: settings.enabled,
     includeAllYears: settings.includeAllYears,
     sharedYears: normalizeYears(settings.sharedYears || []),
+    shareTasteProfiles: settings.shareTasteProfiles ?? false,
   };
 }
 
@@ -46,6 +49,7 @@ export default function SettingsPage() {
   const [enabled, setEnabled] = useState(false);
   const [includeAllYears, setIncludeAllYears] = useState(true);
   const [sharedYears, setSharedYears] = useState<string[]>([]);
+  const [shareTasteProfiles, setShareTasteProfiles] = useState(false);
   const [savedSettings, setSavedSettings] = useState<SettingsFormState | null>(null);
 
   const { data, isLoading, error } = useQuery<ShareSettingsResponse>({
@@ -59,6 +63,7 @@ export default function SettingsPage() {
     setEnabled(nextSettings.enabled);
     setIncludeAllYears(nextSettings.includeAllYears);
     setSharedYears(nextSettings.sharedYears);
+    setShareTasteProfiles(nextSettings.shareTasteProfiles);
     setSavedSettings(nextSettings);
   }, [data]);
 
@@ -67,7 +72,8 @@ export default function SettingsPage() {
     enabled,
     includeAllYears,
     sharedYears: normalizeYears(sharedYears),
-  }), [username, enabled, includeAllYears, sharedYears]);
+    shareTasteProfiles,
+  }), [username, enabled, includeAllYears, sharedYears, shareTasteProfiles]);
 
   const hasUnsavedChanges = savedSettings !== null
     && JSON.stringify(currentSettings) !== JSON.stringify(savedSettings);
@@ -84,6 +90,7 @@ export default function SettingsPage() {
         enabled,
         includeAllYears,
         sharedYears,
+        shareTasteProfiles,
       });
       return response.json();
     },
@@ -94,6 +101,7 @@ export default function SettingsPage() {
       setEnabled(nextSettings.enabled);
       setIncludeAllYears(nextSettings.includeAllYears);
       setSharedYears(nextSettings.sharedYears);
+      setShareTasteProfiles(nextSettings.shareTasteProfiles);
       setSavedSettings(nextSettings);
       toast({
         title: 'Share settings saved',
@@ -182,6 +190,20 @@ export default function SettingsPage() {
               </p>
             </div>
             <Switch id="share-enabled" checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border p-4">
+            <div>
+              <Label htmlFor="share-taste-profiles" className="font-medium">Share Taste Profiles</Label>
+              <p className="text-sm text-muted-foreground mt-1">
+                If generated, your TV and movie Taste Profiles can appear on your public shared list.
+              </p>
+            </div>
+            <Switch
+              id="share-taste-profiles"
+              checked={shareTasteProfiles}
+              onCheckedChange={setShareTasteProfiles}
+            />
           </div>
 
           <div className="space-y-3">

@@ -9,11 +9,27 @@ import type {
   UserMovieList,
   UserWatchlist,
 } from "@shared/schema";
-import { createNvidiaChatCompletion, isLlmClientError } from "./llm-client";
+import { createNvidiaChatCompletion, isLlmClientError, type LlmChatMessage } from "./llm-client";
 import { storage } from "./storage";
 
-export const TV_TASTE_PROFILE_PROMPT_VERSION = "tv-taste-profile-v3";
-export const MOVIE_TASTE_PROFILE_PROMPT_VERSION = "movie-taste-profile-v1";
+export const TV_TASTE_PROFILE_PROMPT_VERSION = "tv-taste-profile-v8";
+export const MOVIE_TASTE_PROFILE_PROMPT_VERSION = "movie-taste-profile-v6";
+
+type ConfidenceTier = "no_signal" | "very_limited_signal" | "limited_signal" | "healthy_signal";
+
+type EvaluationContext = {
+  confidenceTier: ConfidenceTier;
+  usableItemCount: number;
+  datedActivityCount: number;
+  genreCount: number;
+  ratedItemCount: number;
+  hasOnlyRecentDates: boolean;
+  hasOnlyOldDates: boolean;
+  hasMissingMetadata: boolean;
+  hasNarrowGenreHistory: boolean;
+  hasConflictingRatingsOrOutliers: boolean;
+  recommendedCaveat: string;
+};
 
 type WatchlistWithActivity = UserWatchlist & {
   show: TvShow;
@@ -103,13 +119,46 @@ export function isAiGenerationError(error: unknown): error is AiGenerationError 
   return error instanceof AiGenerationError;
 }
 
+export class AiInsufficientSignalError extends Error {
+  code = "AI_INSUFFICIENT_SIGNAL" as const;
+  mediaType: "tv" | "movie";
+
+  constructor(mediaType: "tv" | "movie", message: string) {
+    super(message);
+    this.name = "AiInsufficientSignalError";
+    this.mediaType = mediaType;
+  }
+}
+
+export function isAiInsufficientSignalError(error: unknown): error is AiInsufficientSignalError {
+  return error instanceof AiInsufficientSignalError;
+}
+
 const tasteProfileSchema = z.object({
   tasteSummary: z.string().min(1),
   topGenres: z.array(z.string()).default([]),
   favoritePatterns: z.array(z.string()).max(5).default([]),
   recentTrends: z.array(z.string()).optional(),
   discoveryLanes: z.array(z.string()).max(5).default([]),
+  tasteArchetype: z.object({
+    primary: z.string().min(1),
+    secondary: z.array(z.string().min(1)).min(2).max(4),
+    avoidancePattern: z.string().min(1),
+    recommendationNorthStar: z.string().min(1),
+  }).nullable().optional(),
 });
+
+const RECENT_ACTIVITY_WINDOW_DAYS = 90;
+const OLD_ACTIVITY_THRESHOLD_DAYS = 365;
+const CONFLICTING_RATING_SPREAD = 40;
+const MAX_PROFILE_GENERATION_RETRIES = 2;
+const PROFILE_STRING_ARRAY_FIELDS = [
+  "topGenres",
+  "favoritePatterns",
+  "recentTrends",
+  "discoveryLanes",
+  "secondary",
+];
 
 function normalizeDate(value?: string | Date | null) {
   if (!value) return null;
@@ -165,6 +214,224 @@ function splitGenres(genre: string | null) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+
+function normalizeGenreKey(genre: string) {
+  return genre.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function isUsableTvItem(item: ShowPromptItem) {
+  return item.watchedSeasons.length > 0 || item.ratedSeasons > 0;
+}
+
+function isUsableMovieItem(item: MoviePromptItem) {
+  return item.isWatched || item.userRating != null;
+}
+
+function getSourceGenreRanking<T>(
+  items: T[],
+  getGenre: (item: T) => string | null,
+  isUsable: (item: T) => boolean
+) {
+  const genreStats = new Map<string, { genre: string; count: number; firstIndex: number }>();
+
+  items.forEach((item, itemIndex) => {
+    if (!isUsable(item)) return;
+
+    for (const genre of splitGenres(getGenre(item))) {
+      const key = normalizeGenreKey(genre);
+      if (!key) continue;
+
+      const existing = genreStats.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        genreStats.set(key, {
+          genre: genre.trim().replace(/\s+/g, " "),
+          count: 1,
+          firstIndex: itemIndex,
+        });
+      }
+    }
+  });
+
+  return Array.from(genreStats.values())
+    .sort((left, right) => right.count - left.count || left.firstIndex - right.firstIndex)
+    .map((item) => item.genre);
+}
+
+function applySourceTopGenreConstraint(profile: AiTasteProfile, allowedTopGenres: string[]): AiTasteProfile {
+  if (allowedTopGenres.length === 0) {
+    return {
+      ...profile,
+      topGenres: [],
+    };
+  }
+
+  const genreByKey = new Map(allowedTopGenres.map((genre) => [normalizeGenreKey(genre), genre]));
+  const selectedKeys = new Set<string>();
+  const topGenres: string[] = [];
+
+  for (const genre of profile.topGenres) {
+    const key = normalizeGenreKey(genre);
+    const allowedGenre = genreByKey.get(key);
+    if (!allowedGenre || selectedKeys.has(key)) continue;
+
+    selectedKeys.add(key);
+    topGenres.push(allowedGenre);
+    if (topGenres.length >= 6) break;
+  }
+
+  const minimumGenreCount = Math.min(3, allowedTopGenres.length);
+  for (const genre of allowedTopGenres) {
+    if (topGenres.length >= minimumGenreCount) break;
+
+    const key = normalizeGenreKey(genre);
+    if (selectedKeys.has(key)) continue;
+
+    selectedKeys.add(key);
+    topGenres.push(genre);
+  }
+
+  return {
+    ...profile,
+    topGenres,
+  };
+}
+
+function getConfidenceTier(usableItemCount: number): ConfidenceTier {
+  if (usableItemCount === 0) return "no_signal";
+  if (usableItemCount <= 3) return "very_limited_signal";
+  if (usableItemCount <= 7) return "limited_signal";
+  return "healthy_signal";
+}
+
+function getRecommendedCaveat(confidenceTier: ConfidenceTier) {
+  switch (confidenceTier) {
+    case "no_signal":
+      return "Do not generate a taste profile. Ask the user to add watched or rated history first.";
+    case "very_limited_signal":
+      return "Frame this as an early read based on limited watched or rated history.";
+    case "limited_signal":
+      return "Describe visible patterns without sweeping claims.";
+    case "healthy_signal":
+      return "Make firmer taste claims when supported, while staying grounded in supplied data.";
+  }
+}
+
+function getDateFlags(dates: string[]) {
+  const validDates = dates
+    .map((date) => new Date(date))
+    .filter((date) => !Number.isNaN(date.getTime()));
+
+  if (validDates.length === 0) {
+    return {
+      hasOnlyRecentDates: false,
+      hasOnlyOldDates: false,
+    };
+  }
+
+  const now = Date.now();
+  const dayInMs = 24 * 60 * 60 * 1000;
+  const agesInDays = validDates.map((date) => (now - date.getTime()) / dayInMs);
+
+  return {
+    hasOnlyRecentDates: agesInDays.every((age) => age >= 0 && age <= RECENT_ACTIVITY_WINDOW_DAYS),
+    hasOnlyOldDates: agesInDays.every((age) => age > OLD_ACTIVITY_THRESHOLD_DAYS),
+  };
+}
+
+function hasConflictingRatingsOrOutliers(ratings: number[]) {
+  if (ratings.length < 3) return false;
+  return Math.max(...ratings) - Math.min(...ratings) >= CONFLICTING_RATING_SPREAD;
+}
+
+function buildTvEvaluationContext(items: ShowPromptItem[]): EvaluationContext {
+  const usableItemCount = items.filter(isUsableTvItem).length;
+  const datedActivity = items.map((item) => item.lastActivity).filter((date): date is string => Boolean(date));
+  const genreCount = new Set(items.flatMap((item) => splitGenres(item.genre))).size;
+  const ratedItemCount = items.reduce((total, item) => total + item.ratedSeasons, 0);
+  const confidenceTier = getConfidenceTier(usableItemCount);
+  const ratings = items.flatMap((item) => item.seasonDetails)
+    .map((season) => season.rating)
+    .filter((rating): rating is number => rating != null);
+  const dateFlags = getDateFlags(datedActivity);
+
+  return {
+    confidenceTier,
+    usableItemCount,
+    datedActivityCount: datedActivity.length,
+    genreCount,
+    ratedItemCount,
+    ...dateFlags,
+    hasMissingMetadata: items.some((item) => !item.genre || !item.description),
+    hasNarrowGenreHistory: usableItemCount >= 2 && genreCount <= 1,
+    hasConflictingRatingsOrOutliers: hasConflictingRatingsOrOutliers(ratings),
+    recommendedCaveat: getRecommendedCaveat(confidenceTier),
+  };
+}
+
+function buildMovieEvaluationContext(items: MoviePromptItem[]): EvaluationContext {
+  const usableItemCount = items.filter(isUsableMovieItem).length;
+  const datedActivity = items.map((item) => item.watchedDate).filter((date): date is string => Boolean(date));
+  const genreCount = new Set(items.flatMap((item) => splitGenres(item.genre))).size;
+  const ratings = items
+    .map((item) => item.userRating)
+    .filter((rating): rating is number => rating != null);
+  const confidenceTier = getConfidenceTier(usableItemCount);
+  const dateFlags = getDateFlags(datedActivity);
+
+  return {
+    confidenceTier,
+    usableItemCount,
+    datedActivityCount: datedActivity.length,
+    genreCount,
+    ratedItemCount: ratings.length,
+    ...dateFlags,
+    hasMissingMetadata: items.some((item) => !item.genre || !item.description),
+    hasNarrowGenreHistory: usableItemCount >= 2 && genreCount <= 1,
+    hasConflictingRatingsOrOutliers: hasConflictingRatingsOrOutliers(ratings),
+    recommendedCaveat: getRecommendedCaveat(confidenceTier),
+  };
+}
+
+const sharedEvaluationGuidance = [
+  "Use evaluationContext to calibrate confidence. If confidenceTier is very_limited_signal, make the tasteSummary explicitly provisional. If confidenceTier is limited_signal, describe visible patterns without sweeping claims. If confidenceTier is healthy_signal, you may make firmer claims while staying grounded in the supplied data.",
+  "Apply evaluationContext.recommendedCaveat directly when shaping tasteSummary.",
+  "Do not infer strong preferences from items that were only added to the list but not watched or rated.",
+  "If hasNarrowGenreHistory is true, describe the focus without pretending breadth.",
+  "If hasConflictingRatingsOrOutliers is true, avoid letting one title or rating define the whole profile; describe contrast when useful.",
+  "If hasMissingMetadata is true, make conservative claims from available titles, descriptions, ratings, dates, and activity.",
+  "Return empty arrays when a section is unsupported rather than filling space.",
+  "Only include recentTrends when dated activity supports a meaningful before/after shift. If dates are missing, sparse, only recent, or only old, return an empty recentTrends array.",
+  "If hasOnlyOldDates is true, avoid current-taste language and frame the profile as based on historical activity.",
+];
+
+const sharedTitleSafeSummaryGuidance = [
+  "Use supplied titles as private evidence only; do not include exact TV show or movie titles in tasteSummary.",
+  "In tasteSummary, generalize titles into traits, such as morally gray serialized dramas, character-led workplace comedy, or high-concept speculative mystery.",
+  "In tasteSummary, do not write examples like such as, including, or like followed by supplied titles.",
+  "This no-title rule applies only to tasteSummary. Other profile fields should follow their own instructions.",
+];
+
+const sharedJsonGuidance = [
+  "Return one JSON object only. Do not include Markdown, prose before or after JSON, comments, or trailing commas.",
+  "Every array item must be a valid quoted JSON string. This includes topGenres, favoritePatterns, recentTrends, discoveryLanes, and tasteArchetype.secondary.",
+  "Never put bare words or unquoted phrases inside arrays. Write [\"Ensemble-driven storytelling\"] instead of [Ensemble-driven storytelling].",
+];
+
+const sharedArchetypeGuidance = [
+  "Only include tasteArchetype when evaluationContext.confidenceTier is healthy_signal.",
+  "If confidenceTier is no_signal, very_limited_signal, or limited_signal, return tasteArchetype as null.",
+  "The archetype must be inferred only from supplied watched/rated history and supported metadata.",
+  "Do not invent titles, genres, themes, platforms, or ratings to justify an archetype.",
+  "Make archetype labels specific, compact, and recommendation-useful, not generic personality labels.",
+  "Primary archetype should be one vivid phrase that summarizes the strongest supported taste pattern.",
+  "Secondary archetypes should contain 2 to 4 shorter labels for distinct supporting patterns.",
+  "Avoidance pattern should describe traits the user likely avoids, only when supported by low ratings, dropped/unfinished activity, or clear contrast with liked history.",
+  "If avoidance evidence is indirect, phrase it cautiously.",
+  "Recommendation north star should explain what future recommendations should optimize for in one sentence.",
+  "Do not repeat the same idea across primary, secondary, avoidancePattern, and recommendationNorthStar.",
+];
 
 function buildTvSourceSummary(items: ShowPromptItem[]): AiInsightSourceSummary {
   const ratings = items
@@ -282,6 +549,238 @@ function extractJsonObject(content: string) {
   });
 }
 
+function findArrayCloseIndex(json: string, openBracketIndex: number) {
+  let inString = false;
+  let escaped = false;
+
+  for (let index = openBracketIndex + 1; index < json.length; index += 1) {
+    const char = json[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "]") {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function splitArrayItems(arrayContent: string) {
+  const items: string[] = [];
+  let itemStart = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < arrayContent.length; index += 1) {
+    const char = arrayContent[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === ",") {
+      items.push(arrayContent.slice(itemStart, index));
+      itemStart = index + 1;
+    }
+  }
+
+  items.push(arrayContent.slice(itemStart));
+  return items;
+}
+
+function repairStringArrayItem(item: string) {
+  const value = item.trim();
+  if (!value || value.startsWith("\"")) {
+    return item;
+  }
+
+  if (
+    value.startsWith("{")
+    || value.startsWith("[")
+    || value.includes(":")
+    || /^(true|false|null)$/i.test(value)
+    || /^-?\d+(?:\.\d+)?$/.test(value)
+  ) {
+    return item;
+  }
+
+  const leadingWhitespace = item.match(/^\s*/)?.[0] ?? "";
+  const trailingWhitespace = item.match(/\s*$/)?.[0] ?? "";
+  return `${leadingWhitespace}${JSON.stringify(value)}${trailingWhitespace}`;
+}
+
+function repairStringArrayContent(arrayContent: string) {
+  const items = splitArrayItems(arrayContent);
+  let changed = false;
+  const repairedItems = items.map((item) => {
+    const repairedItem = repairStringArrayItem(item);
+    if (repairedItem !== item) {
+      changed = true;
+    }
+    return repairedItem;
+  });
+
+  return changed ? repairedItems.join(",") : null;
+}
+
+export function repairKnownProfileStringArrays(json: string) {
+  let repairedJson = json;
+  let changed = false;
+
+  for (const field of PROFILE_STRING_ARRAY_FIELDS) {
+    const fieldPattern = new RegExp(`"${field}"\\s*:\\s*\\[`, "g");
+    let match: RegExpExecArray | null;
+
+    while ((match = fieldPattern.exec(repairedJson)) !== null) {
+      const openBracketIndex = match.index + match[0].lastIndexOf("[");
+      const closeBracketIndex = findArrayCloseIndex(repairedJson, openBracketIndex);
+      if (closeBracketIndex === -1) {
+        break;
+      }
+
+      const arrayContent = repairedJson.slice(openBracketIndex + 1, closeBracketIndex);
+      const repairedContent = repairStringArrayContent(arrayContent);
+      if (!repairedContent) {
+        fieldPattern.lastIndex = closeBracketIndex + 1;
+        continue;
+      }
+
+      repairedJson = [
+        repairedJson.slice(0, openBracketIndex + 1),
+        repairedContent,
+        repairedJson.slice(closeBracketIndex),
+      ].join("");
+      changed = true;
+      fieldPattern.lastIndex = openBracketIndex + 1 + repairedContent.length + 1;
+    }
+  }
+
+  return changed ? repairedJson : null;
+}
+
+export function parseTasteProfileJsonContent(content: string) {
+  const json = extractJsonObject(content);
+
+  try {
+    return JSON.parse(json);
+  } catch (strictParseError) {
+    const repairedJson = repairKnownProfileStringArrays(json);
+    if (!repairedJson) {
+      throw strictParseError;
+    }
+
+    return JSON.parse(repairedJson);
+  }
+}
+
+function applyArchetypeGate(profile: AiTasteProfile, evaluationContext: EvaluationContext): AiTasteProfile {
+  if (evaluationContext.confidenceTier === "healthy_signal") {
+    return profile;
+  }
+
+  return {
+    ...profile,
+    tasteArchetype: null,
+  };
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getTitleMentionRegex(title: string) {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  if (!normalizedTitle) return null;
+
+  const pattern = escapeRegExp(normalizedTitle).replace(/\s+/g, "\\s+");
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${pattern}(?=$|[^\\p{L}\\p{N}])`, "iu");
+}
+
+export function findTasteSummaryTitleMention(tasteSummary: string, titles: string[]) {
+  const uniqueTitles = Array.from(new Set(titles.map((title) => title.trim()).filter(Boolean)));
+
+  for (const title of uniqueTitles) {
+    const titleRegex = getTitleMentionRegex(title);
+    if (titleRegex?.test(tasteSummary)) {
+      return title;
+    }
+  }
+
+  return null;
+}
+
+function validateTasteSummaryHasNoTitles(profile: AiTasteProfile, titles: string[]) {
+  return findTasteSummaryTitleMention(profile.tasteSummary, titles);
+}
+
+export function parseAndValidateTasteProfileContent(content: string, titles: string[], model?: string) {
+  let parsed: unknown;
+  try {
+    parsed = parseTasteProfileJsonContent(content);
+  } catch (error) {
+    if (isAiGenerationError(error)) {
+      error.model = model;
+      error.upstreamBody = content;
+      throw error;
+    }
+
+    throw new AiGenerationError("NVIDIA generation returned invalid profile JSON.", {
+      stage: "profile_parse",
+      provider: "nvidia",
+      model,
+      upstreamBody: content,
+      cause: error,
+    });
+  }
+
+  let profile: AiTasteProfile;
+  try {
+    profile = tasteProfileSchema.parse(parsed);
+  } catch (error) {
+    throw new AiGenerationError("NVIDIA generation returned a profile with an invalid schema.", {
+      stage: "profile_validation",
+      provider: "nvidia",
+      model,
+      upstreamBody: content,
+      cause: error,
+    });
+  }
+
+  const titleMention = validateTasteSummaryHasNoTitles(profile, titles);
+  if (titleMention) {
+    throw new AiGenerationError("NVIDIA generation returned a taste summary that names a supplied title.", {
+      stage: "profile_validation",
+      provider: "nvidia",
+      model,
+      upstreamBody: content,
+      cause: new Error(`tasteSummary included supplied title: ${titleMention}`),
+    });
+  }
+
+  return profile;
+}
+
 async function markObservedCallFailed(logId: number | null, error: AiGenerationError) {
   if (logId === null) return;
 
@@ -299,109 +798,143 @@ async function markObservedCallFailed(logId: number | null, error: AiGenerationE
   }
 }
 
+function getRetryMessages(input: {
+  systemPrompt: string;
+  userPrompt: string;
+  attempt: number;
+  previousError: AiGenerationError | null;
+}): LlmChatMessage[] {
+  const messages: LlmChatMessage[] = [
+    { role: "system", content: input.systemPrompt },
+    { role: "user", content: input.userPrompt },
+  ];
+
+  if (input.attempt === 0) {
+    return messages;
+  }
+
+  messages.push({
+    role: "assistant",
+    content: "The previous response was rejected and was not saved because it was not valid profile JSON.",
+  });
+  messages.push({
+    role: "user",
+    content: [
+      `Retry ${input.attempt} of ${MAX_PROFILE_GENERATION_RETRIES}.`,
+      "Return only one valid JSON object matching the requested schema.",
+      "All string array items must be quoted JSON strings, with no bare words, no Markdown, no comments, and no trailing commas.",
+      "Keep tasteSummary free of exact supplied TV show or movie titles.",
+      input.previousError ? `Previous validation stage: ${input.previousError.stage}.` : null,
+    ].filter(Boolean).join(" "),
+  });
+
+  return messages;
+}
+
+function shouldRetryProfileOutput(error: AiGenerationError) {
+  return error.stage === "profile_parse" || error.stage === "profile_validation";
+}
+
 async function generateTasteProfileFromPrompt(input: {
   userId: number;
   operation: string;
   promptVersion: string;
   systemPrompt: string;
   userPrompt: string;
+  blockedSummaryTitles: string[];
 }) {
-  let observedLogId: number | null = null;
-  let model: string | undefined;
-  let content: string | null;
+  let previousOutputError: AiGenerationError | null = null;
 
-  try {
-    const completion = await createNvidiaChatCompletion({
-      userId: input.userId,
-      operation: input.operation,
-      promptVersion: input.promptVersion,
-      request: {
-        messages: [
-          { role: "system", content: input.systemPrompt },
-          { role: "user", content: input.userPrompt },
-        ],
-        temperature: 0.35,
-        max_tokens: 1200,
-        stream: false,
-      },
-    });
+  for (let attempt = 0; attempt <= MAX_PROFILE_GENERATION_RETRIES; attempt += 1) {
+    let observedLogId: number | null = null;
+    let model: string | undefined;
+    let content: string | null;
 
-    observedLogId = completion.logId;
-    model = completion.model;
-    content = completion.content;
-  } catch (error) {
-    if (isLlmClientError(error)) {
-      const stage: AiGenerationStage = error.stage === "observability_log" ? "observability_log" : error.stage;
-      throw new AiGenerationError(error.message, {
-        stage,
-        provider: error.provider,
-        model: error.model,
-        upstreamStatus: error.upstreamStatus,
-        upstreamBody: error.upstreamBody,
-        isProviderUnavailable: error.isProviderUnavailable,
-        cause: error.originalError,
+    try {
+      const completion = await createNvidiaChatCompletion({
+        userId: input.userId,
+        operation: input.operation,
+        promptVersion: input.promptVersion,
+        request: {
+          messages: getRetryMessages({
+            systemPrompt: input.systemPrompt,
+            userPrompt: input.userPrompt,
+            attempt,
+            previousError: previousOutputError,
+          }),
+          temperature: 0.35,
+          max_tokens: 1200,
+          stream: false,
+        },
       });
+
+      observedLogId = completion.logId;
+      model = completion.model;
+      content = completion.content;
+    } catch (error) {
+      if (isLlmClientError(error)) {
+        const stage: AiGenerationStage = error.stage === "observability_log" ? "observability_log" : error.stage;
+        throw new AiGenerationError(error.message, {
+          stage,
+          provider: error.provider,
+          model: error.model,
+          upstreamStatus: error.upstreamStatus,
+          upstreamBody: error.upstreamBody,
+          isProviderUnavailable: error.isProviderUnavailable,
+          cause: error.originalError,
+        });
+      }
+
+      throw error;
     }
 
-    throw error;
-  }
-
-  if (!content) {
-    const error = new AiGenerationError("NVIDIA generation returned an empty response.", {
-      stage: "provider_response",
-      provider: "nvidia",
-      model,
-    });
-    await markObservedCallFailed(observedLogId, error);
-    throw error;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(extractJsonObject(content));
-  } catch (error) {
-    if (isAiGenerationError(error)) {
-      error.model = model;
-      error.upstreamBody = content;
+    if (!content) {
+      const error = new AiGenerationError("NVIDIA generation returned an empty response.", {
+        stage: "provider_response",
+        provider: "nvidia",
+        model,
+      });
       await markObservedCallFailed(observedLogId, error);
       throw error;
     }
 
-    const aiError = new AiGenerationError("NVIDIA generation returned invalid profile JSON.", {
-      stage: "profile_parse",
-      provider: "nvidia",
-      model,
-      upstreamBody: content,
-      cause: error,
-    });
-    await markObservedCallFailed(observedLogId, aiError);
-    throw aiError;
+    try {
+      return {
+        profile: parseAndValidateTasteProfileContent(content, input.blockedSummaryTitles, model),
+        model: model ?? "unknown",
+      };
+    } catch (error) {
+      if (!isAiGenerationError(error)) {
+        throw error;
+      }
+
+      await markObservedCallFailed(observedLogId, error);
+      if (!shouldRetryProfileOutput(error) || attempt >= MAX_PROFILE_GENERATION_RETRIES) {
+        throw error;
+      }
+
+      previousOutputError = error;
+    }
   }
 
-  let profile: AiTasteProfile;
-  try {
-    profile = tasteProfileSchema.parse(parsed);
-  } catch (error) {
-    const aiError = new AiGenerationError("NVIDIA generation returned a profile with an invalid schema.", {
-      stage: "profile_validation",
-      provider: "nvidia",
-      model,
-      upstreamBody: content,
-      cause: error,
-    });
-    await markObservedCallFailed(observedLogId, aiError);
-    throw aiError;
-  }
-
-  return {
-    profile,
-    model: model ?? "unknown",
-  };
+  throw previousOutputError ?? new AiGenerationError("NVIDIA generation failed.", {
+    stage: "provider_response",
+    provider: "nvidia",
+  });
 }
 
 export async function generateTvTasteProfile(userId: number, watchlist: WatchlistWithActivity[]) {
   const shows = buildPromptItems(watchlist);
   const sourceSummary = buildTvSourceSummary(shows);
+  const evaluationContext = buildTvEvaluationContext(shows);
+  const allowedTopGenres = getSourceGenreRanking(shows, (show) => show.genre, isUsableTvItem);
+
+  if (shows.length === 0 || evaluationContext.confidenceTier === "no_signal") {
+    throw new AiInsufficientSignalError(
+      "tv",
+      "Add at least one watched or rated TV season before generating a taste profile."
+    );
+  }
 
   const systemPrompt = [
     "You analyze a user's personal TV watching history and create compact, fun taste profiles.",
@@ -420,13 +953,28 @@ export async function generateTvTasteProfile(userId: number, watchlist: Watchlis
       favoritePatterns: ["string"],
       recentTrends: ["string"],
       discoveryLanes: ["string"],
+      tasteArchetype: {
+        type: "object or null",
+        primary: "string",
+        secondary: ["string"],
+        avoidancePattern: "string",
+        recommendationNorthStar: "string",
+      },
     },
     guidance: [
       "Make tasteSummary 150 to 500 words and make it recommendation-ready: someone should be able to recommend shows from this summary alone without seeing the watched list.",
       "In tasteSummary, explain likely taste across genre, tone, pacing, character/plot balance, themes, and storytelling style.",
       "Use fun, specific, compact phrasing. Avoid generic analytics language.",
       "Do not repeat obvious dashboard stats such as total shows, total seasons, or average rating.",
-      "topGenres should contain 3 to 6 concise labels or genre blends.",
+      ...sharedJsonGuidance,
+      ...sharedTitleSafeSummaryGuidance,
+      ...sharedEvaluationGuidance,
+      ...sharedArchetypeGuidance,
+      "For TV, archetypes may consider season-by-season behavior, ensemble/character dynamics, episode structure, pacing, premise complexity, genre blends, tone, and whether the user seems to prefer shows with a strong story engine.",
+      "Use TV-native language such as shows, seasons, episodes, arcs, ensemble, procedural, serialized, comfort watch, prestige, genre, social game, or high-concept only when supported.",
+      "Example style only, not a template to copy: The High-Concept Comfort Strategist.",
+      "topGenres must contain only exact genre strings from allowedTopGenres. Do not invent genres or use tone, format, pacing, theme, trope, archetype, or storytelling-style labels.",
+      "If allowedTopGenres is empty, return an empty topGenres array.",
       "Return at most 5 favoritePatterns.",
       "Return at most 5 discoveryLanes.",
       "If there are more than 5 plausible Favorite Patterns or Discovery Lanes, choose the strongest and most distinct ones.",
@@ -441,6 +989,8 @@ export async function generateTvTasteProfile(userId: number, watchlist: Watchlis
       "Only return an empty recentTrends array when there is not enough dated activity to support a trend.",
       "Use only second-person wording. Never say this viewer, the user, or they.",
     ],
+    evaluationContext,
+    allowedTopGenres,
     sourceSummary,
     shows,
   });
@@ -451,10 +1001,14 @@ export async function generateTvTasteProfile(userId: number, watchlist: Watchlis
     promptVersion: TV_TASTE_PROFILE_PROMPT_VERSION,
     systemPrompt,
     userPrompt,
+    blockedSummaryTitles: shows.map((show) => show.title),
   });
 
   return {
-    profile: generated.profile,
+    profile: applyArchetypeGate(
+      applySourceTopGenreConstraint(generated.profile, allowedTopGenres),
+      evaluationContext
+    ),
     sourceSummary,
     model: generated.model,
     promptVersion: TV_TASTE_PROFILE_PROMPT_VERSION,
@@ -464,6 +1018,15 @@ export async function generateTvTasteProfile(userId: number, watchlist: Watchlis
 export async function generateMovieTasteProfile(userId: number, movieList: MovieListWithActivity[]) {
   const movies = buildMoviePromptItems(movieList);
   const sourceSummary = buildMovieSourceSummary(movies);
+  const evaluationContext = buildMovieEvaluationContext(movies);
+  const allowedTopGenres = getSourceGenreRanking(movies, (movie) => movie.genre, isUsableMovieItem);
+
+  if (movies.length === 0 || evaluationContext.confidenceTier === "no_signal") {
+    throw new AiInsufficientSignalError(
+      "movie",
+      "Add at least one watched or rated movie before generating a taste profile."
+    );
+  }
 
   const systemPrompt = [
     "You analyze a user's personal movie watching history and create compact, fun taste profiles.",
@@ -482,6 +1045,13 @@ export async function generateMovieTasteProfile(userId: number, movieList: Movie
       favoritePatterns: ["string"],
       recentTrends: ["string"],
       discoveryLanes: ["string"],
+      tasteArchetype: {
+        type: "object or null",
+        primary: "string",
+        secondary: ["string"],
+        avoidancePattern: "string",
+        recommendationNorthStar: "string",
+      },
     },
     guidance: [
       "Make tasteSummary 150 to 500 words and make it recommendation-ready: someone should be able to recommend movies from this summary alone without seeing the watched list.",
@@ -489,7 +1059,15 @@ export async function generateMovieTasteProfile(userId: number, movieList: Movie
       "Use fun, specific, compact phrasing. Avoid generic analytics language.",
       "Treat watched and rated movies as the strongest signal. Movies without watched dates or ratings can still inform taste lightly.",
       "Do not repeat obvious dashboard stats such as total movies, watched movies, or average rating.",
-      "topGenres should contain 3 to 6 concise labels or genre blends.",
+      ...sharedJsonGuidance,
+      ...sharedTitleSafeSummaryGuidance,
+      ...sharedEvaluationGuidance,
+      ...sharedArchetypeGuidance,
+      "For movies, archetypes may consider story scale, era, genre blends, director/style signals from descriptions, tone, pacing, rewatchable comfort, spectacle, character focus, and rating contrast.",
+      "Use movie-native language such as films, features, story scale, genre craft, tone, style, era, spectacle, character study, thriller engine, or comfort pick only when supported.",
+      "The movie archetype should not sound like a TV viewing-habit label.",
+      "topGenres must contain only exact genre strings from allowedTopGenres. Do not invent genres or use tone, format, pacing, theme, trope, archetype, or storytelling-style labels.",
+      "If allowedTopGenres is empty, return an empty topGenres array.",
       "Return at most 5 favoritePatterns.",
       "Return at most 5 discoveryLanes.",
       "If there are more than 5 plausible Favorite Patterns or Discovery Lanes, choose the strongest and most distinct ones.",
@@ -504,6 +1082,8 @@ export async function generateMovieTasteProfile(userId: number, movieList: Movie
       "Only return an empty recentTrends array when there is not enough dated activity to support a trend.",
       "Use only second-person wording. Never say this viewer, the user, or they.",
     ],
+    evaluationContext,
+    allowedTopGenres,
     sourceSummary,
     movies,
   });
@@ -514,10 +1094,14 @@ export async function generateMovieTasteProfile(userId: number, movieList: Movie
     promptVersion: MOVIE_TASTE_PROFILE_PROMPT_VERSION,
     systemPrompt,
     userPrompt,
+    blockedSummaryTitles: movies.map((movie) => movie.title),
   });
 
   return {
-    profile: generated.profile,
+    profile: applyArchetypeGate(
+      applySourceTopGenreConstraint(generated.profile, allowedTopGenres),
+      evaluationContext
+    ),
     sourceSummary,
     model: generated.model,
     promptVersion: MOVIE_TASTE_PROFILE_PROMPT_VERSION,
