@@ -39,7 +39,9 @@ Key responsibilities:
 - Constrain AI Top Genres to actual saved genres from watched or rated source metadata before persistence.
 - Gate optional AI taste archetypes through the AI insight evaluation context so they are stored and shown only for healthy-signal profiles.
 - Short-circuit AI insight generation before provider calls when a user has no watched or rated history.
+- Bound TV AI insight prompts to the strongest watched, rated, and recent signals while keeping full-history source summaries for context.
 - Route every LLM provider call through the shared `server/llm-client.ts` observability layer.
+- Time out LLM provider requests so generation returns a retryable error instead of hanging indefinitely.
 - Sanitize AI provider failures before returning them to clients while storing structured diagnostics for the failed stage, provider, model, upstream status, upstream response body, request payload, output, token usage, and response time.
 
 ## Database
@@ -87,6 +89,7 @@ Required production values should be configured through the deployment provider:
 - `NVIDIA_BASE_URL`
 - `NVIDIA_API_KEY`
 - `NVIDIA_MODEL`
+- `LLM_REQUEST_TIMEOUT_MS` or `NVIDIA_REQUEST_TIMEOUT_MS` (optional; defaults to 90000)
 - `OBSERVABILITY_ADMIN_EMAILS`
 - `NODE_ENV`
 - `VITE_API_BASE_URL`

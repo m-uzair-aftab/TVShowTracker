@@ -12,7 +12,7 @@ import {
   type AiTasteProfile, type AiInsightSourceSummary
 } from "@shared/schema";
 import { db } from "./db";
-import { desc, eq, gte, ilike, and, lte, lt, sql, type SQL } from "drizzle-orm";
+import { desc, eq, gte, ilike, and, lte, lt, sql, inArray, type SQL } from "drizzle-orm";
 
 export type LlmCallLogFilters = {
   from?: Date;
@@ -391,36 +391,49 @@ export class DatabaseStorage implements IStorage {
     lastActivity: string | null,
     seasons: SeasonProgress[]
   })[]> {
-    // First get all watchlist items with their shows
     const watchlistItems = await this.getUserWatchlist(userId);
-    
-    // Then for each watchlist item, get the season progress data
-    const result = await Promise.all(watchlistItems.map(async (item) => {
-      const seasons = await this.getSeasonProgress(item.id);
-      
-      // Calculate the last activity date (latest start or finish date across all seasons)
+
+    if (watchlistItems.length === 0) {
+      return [];
+    }
+
+    const watchlistIds = watchlistItems.map((item) => item.id);
+    const seasonRows = await db.select()
+      .from(seasonProgress)
+      .where(inArray(seasonProgress.watchlistId, watchlistIds));
+
+    const seasonsByWatchlistId = new Map<number, SeasonProgress[]>();
+    for (const season of seasonRows) {
+      const seasons = seasonsByWatchlistId.get(season.watchlistId) ?? [];
+      seasons.push(season);
+      seasonsByWatchlistId.set(season.watchlistId, seasons);
+    }
+
+    const result = watchlistItems.map((item) => {
+      const seasons = (seasonsByWatchlistId.get(item.id) ?? [])
+        .sort((a, b) => a.seasonNumber - b.seasonNumber);
       let lastActivity: string | null = null;
-      
+
       for (const season of seasons) {
         const startDate = season.startDate ? new Date(season.startDate) : null;
         const finishDate = season.finishDate ? new Date(season.finishDate) : null;
-        
+
         if (startDate && (!lastActivity || startDate > new Date(lastActivity))) {
           lastActivity = startDate.toISOString();
         }
-        
+
         if (finishDate && (!lastActivity || finishDate > new Date(lastActivity))) {
           lastActivity = finishDate.toISOString();
         }
       }
-      
+
       return {
         ...item,
         lastActivity,
         seasons
       };
-    }));
-    
+    });
+
     // Sort by lastActivity (newest first), with shows without activity at the end
     return result.sort((a, b) => {
       if (!a.lastActivity && !b.lastActivity) return 0;

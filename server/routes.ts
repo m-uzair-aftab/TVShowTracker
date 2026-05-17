@@ -159,6 +159,21 @@ function serializeError(error: unknown) {
   };
 }
 
+function logTvAiInsightStage(
+  userId: number,
+  stage: string,
+  startedAt: number,
+  details: Record<string, unknown> = {}
+) {
+  console.info("TV taste profile generation stage", {
+    route: "POST /api/ai-insights/tv/taste-profile/regenerate",
+    userId,
+    stage,
+    elapsedMs: Date.now() - startedAt,
+    ...details,
+  });
+}
+
 function compareNullableRatings(a: number | null, b: number | null) {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
@@ -432,13 +447,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/ai-insights/tv/taste-profile/regenerate", authHybrid, async (req, res) => {
     const userId = req.userId!;
     let routeStage: "load_watchlist" | "generate_profile" | "persist_insight" = "load_watchlist";
+    const startedAt = Date.now();
 
     try {
+      logTvAiInsightStage(userId, "request_started", startedAt);
       const watchlist = await storage.getUserWatchlistWithActivity(userId);
+      logTvAiInsightStage(userId, "watchlist_loaded", startedAt, {
+        showCount: watchlist.length,
+        seasonCount: watchlist.reduce((total, item) => total + item.seasons.length, 0),
+        watchedSeasonCount: watchlist.reduce(
+          (total, item) => total + item.seasons.filter((season) => season.startDate || season.finishDate).length,
+          0
+        ),
+        ratedSeasonCount: watchlist.reduce(
+          (total, item) => total + item.seasons.filter((season) => season.rating != null).length,
+          0
+        ),
+      });
       routeStage = "generate_profile";
+      logTvAiInsightStage(userId, "llm_generation_started", startedAt);
       const generated = await generateTvTasteProfile(userId, watchlist);
+      logTvAiInsightStage(userId, "llm_generation_finished", startedAt, {
+        model: generated.model,
+        promptVersion: generated.promptVersion,
+      });
       const generatedAt = new Date();
       routeStage = "persist_insight";
+      logTvAiInsightStage(userId, "persist_started", startedAt);
       const insight = await storage.upsertUserAiInsight({
         userId,
         mediaType: "tv",
@@ -450,8 +485,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         generatedAt,
       });
 
+      logTvAiInsightStage(userId, "persist_finished", startedAt, {
+        insightId: insight.id,
+      });
       res.json({ insight });
     } catch (error) {
+      logTvAiInsightStage(userId, "failed", startedAt, {
+        routeStage,
+        error: serializeError(error),
+      });
+
       if (isAiInsufficientSignalError(error)) {
         return res.status(400).json({
           message: error.message,
@@ -470,9 +513,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           upstreamStatus: error.upstreamStatus,
           upstreamBody: error.upstreamBody,
           isProviderUnavailable: error.isProviderUnavailable,
+          isProviderTimeout: error.isProviderTimeout,
           error: serializeError(error),
           originalError: error.originalError ? serializeError(error.originalError) : undefined,
         });
+
+        if (error.isProviderTimeout) {
+          return res.status(504).json({
+            message: "LLM request timed out. Please try again later.",
+            code: "LLM_PROVIDER_TIMEOUT",
+          });
+        }
 
         if (error.isProviderUnavailable) {
           return res.status(503).json({
@@ -554,9 +605,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           upstreamStatus: error.upstreamStatus,
           upstreamBody: error.upstreamBody,
           isProviderUnavailable: error.isProviderUnavailable,
+          isProviderTimeout: error.isProviderTimeout,
           error: serializeError(error),
           originalError: error.originalError ? serializeError(error.originalError) : undefined,
         });
+
+        if (error.isProviderTimeout) {
+          return res.status(504).json({
+            message: "LLM request timed out. Please try again later.",
+            code: "LLM_PROVIDER_TIMEOUT",
+          });
+        }
 
         if (error.isProviderUnavailable) {
           return res.status(503).json({

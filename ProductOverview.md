@@ -14,7 +14,8 @@ TVShowTracker helps users keep a personal record of TV shows and movies, includi
 - AI Taste Profile generation requires at least one watched or rated TV season or movie before calling the LLM provider.
 - AI Taste Profile Top Genres use actual saved genres from watched or rated TV/movie metadata rather than broader style or storytelling labels.
 - AI Taste Profiles can include a TV/movie taste archetype with primary, secondary, avoidance, and recommendation north-star signals once the user's watched or rated history reaches healthy confidence.
-- AI generation failures show friendly retry copy in the UI while detailed provider diagnostics remain in backend logs.
+- AI generation uses bounded provider requests so failures and timeouts show friendly retry copy in the UI while detailed diagnostics remain in backend logs.
+- TV Taste Profile generation prioritizes watched, rated, and recent shows for the prompt while retaining full-history source counts.
 - Operator-only LLM Observability dashboard with raw prompts, outputs, model metadata, token usage, latency, errors, and summary metrics.
 - Personal movie list with watched date, rating, watched platform, sorting, year filtering, and CSV export.
 - Settings page for enabling a public shared list and optional public Taste Profiles.

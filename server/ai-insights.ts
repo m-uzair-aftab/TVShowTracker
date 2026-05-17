@@ -77,6 +77,7 @@ type MoviePromptItem = {
 export type AiGenerationStage =
   | "config"
   | "provider_request"
+  | "provider_timeout"
   | "provider_http"
   | "provider_response"
   | "observability_log"
@@ -90,6 +91,7 @@ type AiGenerationErrorInput = {
   upstreamStatus?: number;
   upstreamBody?: string;
   isProviderUnavailable?: boolean;
+  isProviderTimeout?: boolean;
   cause?: unknown;
 };
 
@@ -100,6 +102,7 @@ export class AiGenerationError extends Error {
   upstreamStatus?: number;
   upstreamBody?: string;
   isProviderUnavailable: boolean;
+  isProviderTimeout: boolean;
   originalError?: unknown;
 
   constructor(message: string, input: AiGenerationErrorInput) {
@@ -111,6 +114,7 @@ export class AiGenerationError extends Error {
     this.upstreamStatus = input.upstreamStatus;
     this.upstreamBody = input.upstreamBody;
     this.isProviderUnavailable = input.isProviderUnavailable ?? false;
+    this.isProviderTimeout = input.isProviderTimeout ?? false;
     this.originalError = input.cause;
   }
 }
@@ -152,6 +156,9 @@ const RECENT_ACTIVITY_WINDOW_DAYS = 90;
 const OLD_ACTIVITY_THRESHOLD_DAYS = 365;
 const CONFLICTING_RATING_SPREAD = 40;
 const MAX_PROFILE_GENERATION_RETRIES = 2;
+const MAX_TV_PROMPT_SHOWS = 60;
+const MAX_PROMPT_DESCRIPTION_CHARS = 700;
+const MAX_TV_SEASON_DETAILS_PER_SHOW = 12;
 const PROFILE_STRING_ARRAY_FIELDS = [
   "topGenres",
   "favoritePatterns",
@@ -480,6 +487,55 @@ function buildPromptItems(watchlist: WatchlistWithActivity[]): ShowPromptItem[] 
       lastActivity: normalizeDate(item.lastActivity),
     };
   });
+}
+
+function truncatePromptText(value: string | null, maxLength: number) {
+  if (!value) return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function getDateTime(value: string | null) {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function getTvPromptSignalScore(item: ShowPromptItem) {
+  return item.watchedSeasons.length + item.ratedSeasons * 2 + (item.averageRating != null ? 1 : 0);
+}
+
+function limitSeasonDetails(seasonDetails: ShowPromptItem["seasonDetails"]) {
+  if (seasonDetails.length <= MAX_TV_SEASON_DETAILS_PER_SHOW) {
+    return seasonDetails;
+  }
+
+  const frontCount = Math.ceil(MAX_TV_SEASON_DETAILS_PER_SHOW / 2);
+  const backCount = Math.floor(MAX_TV_SEASON_DETAILS_PER_SHOW / 2);
+  return [
+    ...seasonDetails.slice(0, frontCount),
+    ...seasonDetails.slice(-backCount),
+  ];
+}
+
+function prepareTvPromptItems(shows: ShowPromptItem[]) {
+  return shows
+    .map((show, originalIndex) => ({ show, originalIndex }))
+    .sort((left, right) => {
+      const leftUsable = isUsableTvItem(left.show) ? 1 : 0;
+      const rightUsable = isUsableTvItem(right.show) ? 1 : 0;
+      return rightUsable - leftUsable
+        || getDateTime(right.show.lastActivity) - getDateTime(left.show.lastActivity)
+        || getTvPromptSignalScore(right.show) - getTvPromptSignalScore(left.show)
+        || left.originalIndex - right.originalIndex;
+    })
+    .slice(0, MAX_TV_PROMPT_SHOWS)
+    .map(({ show }) => ({
+      ...show,
+      description: truncatePromptText(show.description, MAX_PROMPT_DESCRIPTION_CHARS),
+      seasonDetails: limitSeasonDetails(show.seasonDetails),
+    }));
 }
 
 function calculateAverageMovieRating(items: MoviePromptItem[]) {
@@ -881,6 +937,7 @@ async function generateTasteProfileFromPrompt(input: {
           upstreamStatus: error.upstreamStatus,
           upstreamBody: error.upstreamBody,
           isProviderUnavailable: error.isProviderUnavailable,
+          isProviderTimeout: error.isProviderTimeout,
           cause: error.originalError,
         });
       }
@@ -925,6 +982,7 @@ async function generateTasteProfileFromPrompt(input: {
 
 export async function generateTvTasteProfile(userId: number, watchlist: WatchlistWithActivity[]) {
   const shows = buildPromptItems(watchlist);
+  const promptShows = prepareTvPromptItems(shows);
   const sourceSummary = buildTvSourceSummary(shows);
   const evaluationContext = buildTvEvaluationContext(shows);
   const allowedTopGenres = getSourceGenreRanking(shows, (show) => show.genre, isUsableTvItem);
@@ -988,11 +1046,17 @@ export async function generateTvTasteProfile(userId: number, watchlist: Watchlis
       "Use recentTrends for changes in genre, tone, pacing, format, or viewing habits over time.",
       "Only return an empty recentTrends array when there is not enough dated activity to support a trend.",
       "Use only second-person wording. Never say this viewer, the user, or they.",
+      "The shows array may be capped to the strongest watched, rated, or recent TV signals. Treat sourceSummary and evaluationContext as the full-history context, and do not claim to have seen every saved show.",
     ],
     evaluationContext,
     allowedTopGenres,
     sourceSummary,
-    shows,
+    promptScope: {
+      includedShows: promptShows.length,
+      totalShows: shows.length,
+      selection: "watched, rated, and recent shows first",
+    },
+    shows: promptShows,
   });
 
   const generated = await generateTasteProfileFromPrompt({

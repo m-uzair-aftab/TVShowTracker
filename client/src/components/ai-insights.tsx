@@ -74,8 +74,13 @@ const MAX_PATTERN_ITEMS = 5;
 const MAX_DISCOVERY_ITEMS = 5;
 const MAX_RECENT_TREND_ITEMS = 4;
 const LLM_PROVIDER_UNAVAILABLE_MESSAGE = 'Unable to temporarily reach LLM provider. Try again later.';
+const LLM_PROVIDER_TIMEOUT_MESSAGE = 'The AI request took too long. Please try again later.';
 
 function getProfileGenerationErrorMessage(error: unknown, fallbackMessage: string) {
+  if (error instanceof ApiError && error.code === 'LLM_PROVIDER_TIMEOUT') {
+    return LLM_PROVIDER_TIMEOUT_MESSAGE;
+  }
+
   if (error instanceof ApiError && error.code === 'LLM_PROVIDER_UNAVAILABLE') {
     return LLM_PROVIDER_UNAVAILABLE_MESSAGE;
   }

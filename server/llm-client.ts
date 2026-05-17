@@ -3,6 +3,7 @@ import { storage } from "./storage";
 export type LlmClientStage =
   | "config"
   | "provider_request"
+  | "provider_timeout"
   | "provider_http"
   | "provider_response"
   | "observability_log";
@@ -14,6 +15,7 @@ type LlmClientErrorInput = {
   upstreamStatus?: number;
   upstreamBody?: string;
   isProviderUnavailable?: boolean;
+  isProviderTimeout?: boolean;
   cause?: unknown;
 };
 
@@ -24,6 +26,7 @@ export class LlmClientError extends Error {
   upstreamStatus?: number;
   upstreamBody?: string;
   isProviderUnavailable: boolean;
+  isProviderTimeout: boolean;
   originalError?: unknown;
 
   constructor(message: string, input: LlmClientErrorInput) {
@@ -35,6 +38,7 @@ export class LlmClientError extends Error {
     this.upstreamStatus = input.upstreamStatus;
     this.upstreamBody = input.upstreamBody;
     this.isProviderUnavailable = input.isProviderUnavailable ?? false;
+    this.isProviderTimeout = input.isProviderTimeout ?? false;
     this.originalError = input.cause;
   }
 }
@@ -76,6 +80,7 @@ type ObservedChatCompletionInput = {
 };
 
 const LLM_LOG_RETENTION_DAYS = 90;
+const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 90_000;
 
 function getNvidiaConfig() {
   const baseUrl = process.env.NVIDIA_BASE_URL;
@@ -110,6 +115,19 @@ function isProviderUnavailable(status?: number, body?: string, statusText?: stri
     "overloaded",
     "capacity",
   ].some((needle) => text.includes(needle));
+}
+
+function getLlmRequestTimeoutMs() {
+  const configured = Number(process.env.LLM_REQUEST_TIMEOUT_MS ?? process.env.NVIDIA_REQUEST_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+
+  return DEFAULT_LLM_REQUEST_TIMEOUT_MS;
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function getRetentionCutoff() {
@@ -155,6 +173,10 @@ export async function createNvidiaChatCompletion(input: ObservedChatCompletionIn
   const startedAt = Date.now();
 
   let response: Response;
+  const abortController = new AbortController();
+  const timeoutMs = getLlmRequestTimeoutMs();
+  const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
@@ -163,9 +185,11 @@ export async function createNvidiaChatCompletion(input: ObservedChatCompletionIn
         "Content-Type": "application/json",
       },
       body: JSON.stringify(requestPayload),
+      signal: abortController.signal,
     });
   } catch (error) {
     const responseTimeMs = Date.now() - startedAt;
+    const timedOut = isAbortError(error);
     await persistLlmLog({
       userId: input.userId,
       provider,
@@ -180,19 +204,27 @@ export async function createNvidiaChatCompletion(input: ObservedChatCompletionIn
       totalTokens: null,
       responseTimeMs,
       status: "error",
-      errorStage: "provider_request",
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStage: timedOut ? "provider_timeout" : "provider_request",
+      errorMessage: timedOut
+        ? `LLM provider request timed out after ${timeoutMs}ms.`
+        : error instanceof Error ? error.message : String(error),
       errorStatusCode: null,
       errorBody: null,
     });
 
-    throw new LlmClientError("NVIDIA provider request failed.", {
-      stage: "provider_request",
-      provider,
-      model: config.model,
-      isProviderUnavailable: true,
-      cause: error,
-    });
+    throw new LlmClientError(
+      timedOut ? "NVIDIA provider request timed out." : "NVIDIA provider request failed.",
+      {
+        stage: timedOut ? "provider_timeout" : "provider_request",
+        provider,
+        model: config.model,
+        isProviderUnavailable: true,
+        isProviderTimeout: timedOut,
+        cause: error,
+      }
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 
   const responseTimeMs = Date.now() - startedAt;

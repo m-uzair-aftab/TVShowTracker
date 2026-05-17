@@ -22,11 +22,16 @@ Install dependencies if needed:
 npm install
 ```
 
-Set `DATABASE_URL` in the current shell session or through your deployment provider's environment-variable UI.
-
-Run:
+Run the push with the production database URL for this command only:
 
 ```bash
+DATABASE_URL='your_production_postgres_url' npm run db:push
+```
+
+Or export `DATABASE_URL` in the current shell session first:
+
+```bash
+export DATABASE_URL='your_production_postgres_url'
 npm run db:push
 ```
 
