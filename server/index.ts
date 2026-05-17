@@ -5,6 +5,7 @@ import cors from 'cors';
 
 import { registerRoutes } from './routes';
 import { setupVite, serveStatic, log } from './vite';
+import { ensureShareSettingsSchema } from './schema-maintenance';
 
 const app = express();
 // JSON body parsing
@@ -60,6 +61,8 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await ensureShareSettingsSchema();
+
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

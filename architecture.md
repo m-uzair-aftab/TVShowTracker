@@ -47,6 +47,7 @@ Key responsibilities:
 ## Database
 
 The schema is defined in `shared/schema.ts` and managed with Drizzle.
+On startup, the backend also runs a narrow idempotent repair for the public share-settings table so older production databases receive the expected sharing columns before the Settings and public shared-list routes run.
 
 Important data areas include:
 
